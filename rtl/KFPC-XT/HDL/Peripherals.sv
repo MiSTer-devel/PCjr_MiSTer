@@ -323,6 +323,8 @@ module PERIPHERALS #(
     wire    p_clock_posedge = prev_p_clock_1 & ~prev_p_clock_2;
 
     logic   timer_clock;
+    logic   timer_1_clock;
+    wire    channel_1_clock_select = nmi_mask_register_data[5];
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
@@ -332,6 +334,8 @@ module PERIPHERALS #(
         else
             timer_clock         <= timer_clock;
     end
+
+    assign timer_1_clock = channel_1_clock_select ? timer_counter_out[0] : timer_clock;
 
     logic   [7:0]   timer_data_bus_out;
 
@@ -354,7 +358,7 @@ module PERIPHERALS #(
         .counter_0_clock            (timer_clock),
         .counter_0_gate             (1'b1),
         .counter_0_out              (timer_counter_out[0]),
-        .counter_1_clock            (timer_clock),
+        .counter_1_clock            (timer_1_clock),
         .counter_1_gate             (1'b1),
         .counter_1_out              (timer_counter_out[1]),
         .counter_2_clock            (timer_clock),
