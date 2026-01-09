@@ -597,8 +597,8 @@ end
         end
         else
         begin
-            keybord_interrupt_ff    <= keybord_irq;
-            keybord_interrupt       <= keybord_interrupt_ff;
+            keybord_interrupt_ff    <= pcjr_mode ? 1'b0 : keybord_irq;
+            keybord_interrupt       <= pcjr_mode ? 1'b0 : keybord_interrupt_ff;
             uart_interrupt_ff       <= uart_irq;
             uart_interrupt          <= uart_interrupt_ff;
             uart2_interrupt_ff      <= uart2_irq;
