@@ -227,6 +227,7 @@ module PERIPHERALS #(
     wire    nmi_mask_write_n        = ~nmi_mask_register | io_write_n;
     wire    write_nmi_mask          = ~prev_nmi_mask_write_n & nmi_mask_write_n;
     logic   pcjr_nmi_enable;
+    logic   ir_test_enable;
 
     wire    video_mem_select        = tandy_video_en && ~iorq && ~address_enable_n & (address[19:17] == nmi_mask_register_data[3:1]); // 128KB
     wire    cga_mem_select          = ~iorq && ~address_enable_n && enable_cga & (address[19:15] == 5'b10111); // B8000 - BFFFF (16 KB / 32 KB)
@@ -396,7 +397,7 @@ module PERIPHERALS #(
         .port_a_in                  (port_a_in),
         .port_a_out                 (port_a_out),
         .port_a_io                  (port_a_io),
-        .port_b_in                  (port_b_in),
+        .port_b_in                  (pcjr_mode ? 8'hFF : port_b_in),
         .port_b_out                 (port_b_out),
         .port_b_io                  (port_b_io),
         .port_c_in                  (port_c_in),
@@ -632,9 +633,15 @@ end
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
+        begin
             pcjr_nmi_enable <= 1'b0;
+            ir_test_enable  <= 1'b0;
+        end
         else if (pcjr_mode && write_nmi_mask)
+        begin
             pcjr_nmi_enable <= internal_data_bus[7];
+            ir_test_enable  <= internal_data_bus[6];
+        end
     end
 
     logic   [7:0]   keycode_ff;
