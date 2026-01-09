@@ -995,6 +995,7 @@ module emu
     wire [7:0] cpu_data_bus;
     wire processor_ready;
     wire interrupt_to_cpu;
+    wire nmi_to_cpu;
     wire address_latch_enable;
     wire address_direction;
 
@@ -1033,7 +1034,10 @@ module emu
             cpu_address <= cpu_address;
     end
 
-    CHIPSET #(.clk_rate(cur_rate)) u_CHIPSET
+    CHIPSET #(
+        .clk_rate(cur_rate),
+        .pcjr_mode(1'b1)
+    ) u_CHIPSET
 	(
 		.clock                              (clk_chipset),
 		.cpu_clock                          (clk_cpu),
@@ -1049,6 +1053,7 @@ module emu
 	//	.processor_transmit_or_receive_n    (processor_transmit_or_receive_n),
 		.processor_ready                    (processor_ready),
 		.interrupt_to_cpu                   (interrupt_to_cpu),
+		.nmi_to_cpu                         (nmi_to_cpu),
 		.splashscreen                       (splashscreen),
 		.status0_clear                      (status0_clear_pulse),
 		.std_hsyncwidth                     (std_hsyncwidth),
@@ -1193,7 +1198,7 @@ module emu
 
 		.RESET(reset_cpu),
 		.READY(processor_ready && ~pause_core),
-		.NMI(1'b0),
+		.NMI(nmi_to_cpu),
 		.INTR(interrupt_to_cpu),
 
 		.ad_out(cpu_ad_out),

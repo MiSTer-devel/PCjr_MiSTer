@@ -5,7 +5,8 @@
 // Based on KFPC-XT written by @kitune-san
 //
 module CHIPSET #(
-        parameter clk_rate = 28'd50000000)
+        parameter clk_rate = 28'd50000000,
+        parameter pcjr_mode = 1'b0)
         (
         input   logic           clock,
         input   logic           cpu_clock,
@@ -22,6 +23,7 @@ module CHIPSET #(
         output  logic           processor_transmit_or_receive_n,
         output  logic           processor_ready,
         output  logic           interrupt_to_cpu,
+        output  logic           nmi_to_cpu,
         // SplashScreen
         input   logic           splashscreen,
         input   logic           status0_clear,
@@ -280,7 +282,10 @@ module CHIPSET #(
         .terminal_count_n                   (terminal_count_n)
     );
 
-    PERIPHERALS #(.clk_rate(clk_rate)) u_PERIPHERALS 
+    PERIPHERALS #(
+        .clk_rate                           (clk_rate),
+        .pcjr_mode                          (pcjr_mode)
+    ) u_PERIPHERALS 
     (
         .clock                              (clock),
         .clk_sys                            (clk_sys),
@@ -290,6 +295,7 @@ module CHIPSET #(
         .clk_select                         (clk_select),
         .reset                              (reset),
         .interrupt_to_cpu                   (interrupt_to_cpu),
+        .nmi_to_cpu                         (nmi_to_cpu),
         .interrupt_acknowledge_n            (interrupt_acknowledge_n),
         .dma_chip_select_n                  (dma_chip_select_n),
         .dma_page_chip_select_n             (dma_page_chip_select_n),

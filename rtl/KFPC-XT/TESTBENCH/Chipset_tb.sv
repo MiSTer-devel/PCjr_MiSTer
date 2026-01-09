@@ -78,6 +78,7 @@ module CHIPSET_tm();
     logic           processor_transmit_or_receive_n;
     logic           processor_ready;
     logic           interrupt_to_cpu;
+    logic           nmi_to_cpu;
     // I/O Ports
     logic   [19:0]  address;
     logic   [19:0]  address_ext;

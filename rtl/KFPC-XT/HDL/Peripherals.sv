@@ -6,7 +6,8 @@
 //
 module PERIPHERALS #(
         parameter ps2_over_time = 16'd1000,
-		parameter clk_rate = 28'd50000000
+		parameter clk_rate = 28'd50000000,
+        parameter pcjr_mode = 1'b0
     ) (
         input   logic           clock,
         input   logic           clk_sys,
@@ -16,6 +17,7 @@ module PERIPHERALS #(
         input   logic           reset,
         // CPU
         output  logic           interrupt_to_cpu,
+        output  logic           nmi_to_cpu,
         // Bus Arbiter
         input   logic           interrupt_acknowledge_n,
         output  logic           dma_chip_select_n,
@@ -224,6 +226,7 @@ module PERIPHERALS #(
     logic   prev_nmi_mask_write_n;
     wire    nmi_mask_write_n        = ~nmi_mask_register | io_write_n;
     wire    write_nmi_mask          = ~prev_nmi_mask_write_n & nmi_mask_write_n;
+    logic   pcjr_nmi_enable;
 
     wire    video_mem_select        = tandy_video_en && ~iorq && ~address_enable_n & (address[19:17] == nmi_mask_register_data[3:1]); // 128KB
     wire    cga_mem_select          = ~iorq && ~address_enable_n && enable_cga & (address[19:15] == 5'b10111); // B8000 - BFFFF (16 KB / 32 KB)
@@ -374,6 +377,8 @@ module PERIPHERALS #(
     //
     logic   [7:0]   ppi_data_bus_out;
     logic   [7:0]   port_a_in;
+    logic           prev_keybord_irq;
+    logic           keybd_latch;
 
     KF8255 u_KF8255 
     (
@@ -448,6 +453,32 @@ module PERIPHERALS #(
     );
 
     assign  keycode = ps2_reset_n ? keycode_buf : 8'h80;
+
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset)
+        begin
+            prev_keybord_irq <= 1'b0;
+            keybd_latch      <= 1'b0;
+        end
+        else if (pcjr_mode)
+        begin
+            prev_keybord_irq <= keybord_irq;
+            if (nmi_mask_register && (~io_read_n))
+                keybd_latch <= 1'b0;
+            else if (~prev_keybord_irq & keybord_irq)
+                keybd_latch <= 1'b1;
+            else
+                keybd_latch <= keybd_latch;
+        end
+        else
+        begin
+            prev_keybord_irq <= keybord_irq;
+            keybd_latch      <= 1'b0;
+        end
+    end
+
+    assign nmi_to_cpu = pcjr_mode ? (pcjr_nmi_enable & keybd_latch) : 1'b0;
 
 
     // Keyboard reset
@@ -596,6 +627,14 @@ end
             prev_nmi_mask_write_n <= 1'b1;
         else
             prev_nmi_mask_write_n <= nmi_mask_write_n;
+    end
+
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset)
+            pcjr_nmi_enable <= 1'b0;
+        else if (pcjr_mode && write_nmi_mask)
+            pcjr_nmi_enable <= internal_data_bus[7];
     end
 
     logic   [7:0]   keycode_ff;
