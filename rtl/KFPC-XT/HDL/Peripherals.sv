@@ -643,12 +643,12 @@ end
         if (reset)
         begin
             keycode_ff  <= 8'h00;
-            port_a_in   <= 8'h00;
+            port_a_in   <= pcjr_mode ? 8'hFF : 8'h00;
         end
         else
         begin
             keycode_ff  <= tandy_keycode;
-            port_a_in   <= keycode_ff;
+            port_a_in   <= pcjr_mode ? 8'hFF : keycode_ff;
         end
     end
 
