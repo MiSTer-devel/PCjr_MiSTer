@@ -221,6 +221,9 @@ module PERIPHERALS #(
     wire    joystick_select         = (iorq && ~address_enable_n && address[15:3] == (16'h0200 >> 3)); // 0x200 .. 0x207
     wire    tandy_chip_select_n     = chip_select_n[6]; // 0xC0 .. 0xDF
     wire    nmi_mask_register       = (tandy_video_en && ~nmi_chip_select_n);
+    logic   prev_nmi_mask_write_n;
+    wire    nmi_mask_write_n        = ~nmi_mask_register | io_write_n;
+    wire    write_nmi_mask          = ~prev_nmi_mask_write_n & nmi_mask_write_n;
 
     wire    video_mem_select        = tandy_video_en && ~iorq && ~address_enable_n & (address[19:17] == nmi_mask_register_data[3:1]); // 128KB
     wire    cga_mem_select          = ~iorq && ~address_enable_n && enable_cga & (address[19:15] == 5'b10111); // B8000 - BFFFF (16 KB / 32 KB)
@@ -583,6 +586,14 @@ end
         prev_io_write_n <= io_write_n;
     end
 
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset)
+            prev_nmi_mask_write_n <= 1'b1;
+        else
+            prev_nmi_mask_write_n <= nmi_mask_write_n;
+    end
+
     logic   [7:0]   keycode_ff;
     always_ff @(posedge clock, posedge reset)
     begin
@@ -638,7 +649,7 @@ end
             if (tandy_page_chip_select && (~io_write_n))
                 tandy_page_data <= internal_data_bus;
 
-            if (nmi_mask_register && (~io_write_n))
+            if (write_nmi_mask)
                 nmi_mask_register_data <= internal_data_bus;
         end
 
