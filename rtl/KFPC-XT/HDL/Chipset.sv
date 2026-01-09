@@ -140,12 +140,6 @@ module CHIPSET #(
         input   logic   [1:0]   ems_address,
         // BIOS
         input  logic    [1:0]   bios_protect_flag,
-        // MMC interface
-        input   logic   [1:0]   use_mmc,
-        output  logic           spi_clk,
-        output  logic           spi_cs,
-        output  logic           spi_mosi,
-        input   logic           spi_miso,
         // FDD
         input   logic   [15:0]  mgmt_address,
         input   logic           mgmt_read,
@@ -155,7 +149,6 @@ module CHIPSET #(
         input   logic   [1:0]   floppy_wp,
         output  logic   [1:0]   fdd_present,
         output  logic   [1:0]   fdd_request,
-        output  logic   [2:0]   ide0_request,
         // XTCTL DATA
         output  logic   [7:0]   xtctl,
         // Optional flags
@@ -377,11 +370,6 @@ module CHIPSET #(
         .ems_b2                            (ems_b2),
         .ems_b3                            (ems_b3),
         .ems_b4                            (ems_b4),
-        .use_mmc                            (use_mmc),
-        .spi_clk                            (spi_clk),
-        .spi_cs                             (spi_cs),
-        .spi_mosi                           (spi_mosi),
-        .spi_miso                           (spi_miso),
         .mgmt_address                       (mgmt_address),
         .mgmt_read                          (mgmt_read),
         .mgmt_readdata                      (mgmt_readdata),
@@ -390,7 +378,6 @@ module CHIPSET #(
         .floppy_wp                          (floppy_wp),
         .fdd_present                        (fdd_present),
         .fdd_request                        (fdd_request),
-        .ide0_request                       (ide0_request),
         .fdd_dma_req                        (fdd_dma_req),
         .fdd_dma_ack                        (~dma_acknowledge_n[2]),
         .terminal_count                     (terminal_count_n),

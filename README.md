@@ -23,11 +23,9 @@ The [Graphics Gremlin project](https://github.com/schlae/graphics-gremlin) from 
 * Tandy graphics with 128Kb of shared RAM + CGA graphics
 * Main memory 640Kb
 * Simulated Composite Video, F11 -> Swap Video Output with RGB
-* XTIDE support
 * Audio: Tandy, speaker
 * Joystick support
 * Mouse support into COM1 serial port, this works like any Microsoft mouse... you just need a driver to configure it, like CTMOUSE 1.9 (available into hdd folder)
-* 2nd SD card support
 
 ## Build configuration
 
@@ -40,11 +38,10 @@ This core uses a fixed configuration:
 
 ## Quick Start
 
-* Copy the contents of `games/Tandy1000` to your MiSTer SD Card and uncompress `hd_image.zip`. It contains a FreeDOS image ( http://www.freedos.org/ )
+* Copy the contents of `games/Tandy1000` to your MiSTer SD Card.
 * Select the core from Computers/Tandy1000.
 * Press WinKey + F12 on your keyboard.
   * CPU Speed: PC/AT 3.5MHz (Max speed)
-  * FDD & HDD -> HDD Image: FreeDOS_HD.img
   * BIOS -> Tandy BIOS: tandy.rom
 * Choose Reset & apply settings.
 
@@ -54,9 +51,6 @@ ROMs should be provided initially from the BIOS section of the OSD menu. The cor
 
 * `make_rom_with_tandy.py`: A valid ROM is created for the Tandy core (tandy.rom) based on the original Tandy 1000 ROM.
 
-Other Open Source ROMs are available in the same folder:
-
-* `ide_xtl.rom`: XTIDE BIOS image used by ROM-generation scripts; it can be upgraded to a newer version. ([Source Code](https://www.xtideuniversalbios.org/))
 
 ## Other BIOSes
 

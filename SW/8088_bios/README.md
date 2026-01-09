@@ -14,14 +14,9 @@ and [Xi 8088] systems
 |----------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------|
 |[bios-micro8088.bin](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-micro8088.bin)             | BIOS image for Micro 8088 Version 1.1 to use with xiflash utility |
 |[bios-micro8088-noide.rom](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-micro8088-noide.rom) | BIOS image for Micro 8088 Version 1.1                             |
-|[bios-micro8088-xtide.rom](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-micro8088-xtide.rom) | BIOS image for Micro 8088 Version 1.1 with XT-IDE                 |
 |[bios-xi8088.bin](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-xi8088.bin)                   | BIOS image for Xi 8088 Version 2.0 to use with xiflash utility    |
 |[bios-xi8088-noide.rom](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-xi8088-noide.rom)       | BIOS image for Xi 8088 Version 2.0                                |
-|[bios-xi8088-xtide.rom](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-xi8088-xtide.rom)       | BIOS image for Xi 8088 Version 2.0 with XT-IDE                    |
 |[bios-sergey-xt-noide.rom](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-sergey-xt-noide.rom) | BIOS image for Sergey's XT Version 1.0                            |
-|[bios-sergey-xt-xtide.rom](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-sergey-xt-xtide.rom) | BIOS image for Sergey's XT Version 1.0 with XT-IDE                |
-|[bios-book8088-xtide.rom](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-book8088-xtide.rom)   | BIOS image for Book8088 with XT-IDE                               |
-|[bios-book8088-xtide-v20.rom](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-book8088-xtide-v20.rom)   | BIOS image for Book8088 with XT-IDE optimized for NEC V20 |
 |[bios-xt.bin](https://github.com/skiselev/8088_bios/blob/master/binaries/bios-xt.bin)                           | BIOS image for IBM XT (not tested, 16 KiB ROM)                    |
 
 ## Build Instructions
@@ -40,7 +35,6 @@ and [Xi 8088] systems
 * Version 1.0.0
   * Add support for Book8088
   * Implement several fixes for IBM XT
-  * Update XT-IDE Extension BIOS to r625
   * Use CMake and build ROM images for all supported machines and configurations
 
 * Version 0.9.9a (Alternative version by spark2K06)
@@ -57,7 +51,6 @@ and [Xi 8088] systems
   * Add a setup option for configuring wait states for Faraday FE2010A and Proton PT8010AF chipsets
   * Add a setup configuration option to disable power-on memory test. Disabling the memory test speeds up the boot process
   * Add support for SST39SF020A and SST39SF040 Flash ROMs. Note that unused address lines on these chips need to be connected to the ground
-  * Update XT-IDE BIOS ROM Extension to r624. Add corresponding xtidecfg.com utility. The XT-IDE BIOS ROM image provided with 8088 BIOS is configured for XT-CF-Lite at port 0x320. Use the xtidecfg.com utility to reconfigure that if needed prior to building the BIOS
   * Fix keyboard scan codes for several key combinations: Ctrl-b, Ctrl-v, Ctrl-q, Alt-q, Ctrl-+
   * Fix an issue with BIOS resetting equipment list after VGA BIOS extension initialization, which resulted in a missing or incorrect video output then VGA is connected to a monochrome display
 
@@ -84,7 +77,6 @@ and [Xi 8088] systems
 * Version 0.9.5
   * Micro 8088: Fix reading serial port status
   * Micro 8088: Implement checksum for the Flash ROM configuration space
-  * Fix booting without XTIDE Universal BIOS
 
 * Version 0.9.4
   * Micro 8088: Implement BIOS setup utility including saving configuration to the BIOS Flash ROM
@@ -167,7 +159,6 @@ and [Xi 8088] systems
 * **(low)** Keyboard - sound on buffer overflow
 * **(low)** More tests - RTC, memory, DMA
 * **(low)** Init display before keyboard, so KBD errors can be displayed. Alternatively store non-fatal errors and display them after display is initialized
-* **(low)** Check possibility of using same EBDA for XT-IDE BIOS and system BIOS PS/2 mouse functions
 * **(low)** BIOS checksum
 * **(enh)** Add PnP extension
 

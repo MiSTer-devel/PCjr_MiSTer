@@ -110,12 +110,6 @@ module PERIPHERALS #(
         output  logic           ems_b2,
         output  logic           ems_b3,
         output  logic           ems_b4,
-        // MMC interface
-        input   logic   [1:0]   use_mmc,
-        output  logic           spi_clk,
-        output  logic           spi_cs,
-        output  logic           spi_mosi,
-        input   logic           spi_miso,
         // FDD
         input   logic   [15:0]  mgmt_address,
         input   logic           mgmt_read,
@@ -125,7 +119,6 @@ module PERIPHERALS #(
         input   logic   [1:0]   floppy_wp,
         output  logic   [1:0]   fdd_present,
         output  logic   [1:0]   fdd_request,
-        output  logic   [2:0]   ide0_request,
         output  logic           fdd_dma_req,
         input   logic           fdd_dma_ack,
         input   logic           terminal_count,
@@ -238,7 +231,6 @@ module PERIPHERALS #(
     wire    tandy_page_chip_select  = tandy_video_en && iorq && ~address_enable_n && address[15:0] == 16'h03DF;
     wire    xtctl_chip_select       = (iorq && ~address_enable_n && address[15:0] == 16'h8888);
     wire    rtc_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h02C0 >> 1)); // 0x2C0 .. 0x2C1
-    wire    ide0_chip_select_n      = ~(iorq && ~address_enable_n && ({address[15:4], 4'd0} == 16'h0300));
     wire    floppy0_chip_select_n   = ~(~address_enable_n && (({address[15:2], 2'd0} == 16'h03F0) || ({address[15:1], 1'd0} == 16'h03F4) || ({address[15:0]} == 16'h03F7)));
 
     //
@@ -1069,146 +1061,6 @@ end
     );
 
     //
-    // XT2IDE
-    //
-    logic   [7:0]   xt2ide0_data_bus_out;
-    logic           ide0_cs1fx;
-    logic           ide0_cs3fx;
-    logic           ide0_io_read_n;
-    logic           ide0_io_write_n;
-    logic   [2:0]   ide0_address;
-    logic   [15:0]  ide0_data_bus_in;
-    logic   [15:0]  ide0_data_bus_out;
-
-    XT2IDE xt2ide0 (
-        .clock              (clock),
-        .reset              (reset),
-
-        .high_speed         (0),
-
-        .chip_select_n      (ide0_chip_select_n),
-        .io_read_n          (io_read_n),
-        .io_write_n         (io_write_n),
-
-        .address            (address[3:0]),
-        .data_bus_in        (internal_data_bus),
-        .data_bus_out       (xt2ide0_data_bus_out),
-
-        .ide_cs1fx          (ide0_cs1fx),
-        .ide_cs3fx          (ide0_cs3fx),
-        .ide_io_read_n      (ide0_io_read_n),
-        .ide_io_write_n     (ide0_io_write_n),
-
-        .ide_address        (ide0_address),
-        .ide_data_bus_in    (ide0_data_bus_in),
-        .ide_data_bus_out   (ide0_data_bus_out)
-    );
-
-
-    //
-    // IDE
-    //
-    logic           mgmt_ide0_cs;
-    logic [15:0]    mgmt_ide0_readdata;
-    logic           ide0_command_cs;
-    logic           ide0_control_cs;
-    logic           ide0_comd_ctrl_select;
-    logic           ide0_io_read;
-    logic           ide0_io_read_1;
-    logic           ide0_io_write;
-    logic           prev_ide0_io_read;
-    logic           prev_ide0_io_write;
-    logic [3:0]     ide0_address_1;
-    logic [15:0]    ide0_writedata;
-    logic [15:0]    ide_readdata;
-    logic           ide_ignore;
-
-    assign mgmt_ide0_cs     = (mgmt_address[15:8] == 8'hF0);
-
-    assign ide0_command_cs  = ~ide0_cs1fx;
-    assign ide0_control_cs  = ~ide0_cs3fx & &ide0_address[2:1];
-    assign ide0_io_read     = ~ide0_io_read_n  & (ide0_command_cs | ide0_control_cs);
-    assign ide0_io_write    = ~ide0_io_write_n & (ide0_command_cs | ide0_control_cs);
-
-    always_ff @(posedge clock)
-    begin
-        ide0_io_read_1          <= ide0_io_read;
-        prev_ide0_io_read       <= ide0_io_read_1;
-        prev_ide0_io_write      <= ide0_io_write;
-        ide0_address_1          <= ~ide0_control_cs ? {1'b0, ide0_address} : {1'b1, ide0_address};
-        ide0_writedata          <= ide0_data_bus_out;
-    end
-
-    ide ide
-    (
-        .clk            (clock),
-        .rst_n          (~reset),
-
-//        .irq            (),
-//        .drq            (),
-
-        .use_fast       (0),
-//        .no_data        (),
-
-//        .drive_en       (),
-
-        .io_address     (ide0_address_1),
-        .io_read        (ide0_io_read   & ~prev_ide0_io_read),
-        .io_readdata    (ide_readdata),
-        .io_write       (~ide0_io_write & prev_ide0_io_write),
-        .io_writedata   (ide0_writedata),
-        .io_32          (0),
-
-//        .io_wait        (),
-
-        .request                    (ide0_request),
-        .mgmt_address               (mgmt_address[3:0]),
-        .mgmt_writedata             (mgmt_writedata),
-        .mgmt_readdata              (mgmt_ide0_readdata),
-        .mgmt_write                 (mgmt_write & mgmt_ide0_cs),
-        .mgmt_read                  (mgmt_read & mgmt_ide0_cs),
-
-        .primary_only               (use_mmc == 2'b10),
-        .secondary_only             (use_mmc == 2'b01),
-        .ignore_access              (ide_ignore)
-    );
-
-
-    //
-    // XTIDE-MMC
-    //
-    logic [15:0]    mmcide_readdata;
-    wire    enable_mmc_n    = ~((use_mmc == 2'b01) | (use_mmc == 2'b10));
-
-    KFMMC_DRIVE_IDE #(
-        .init_spi_clock_cycle               (8'd150),
-        .normal_spi_clock_cycle             (8'd002)
-    ) u_KFMMC_DRIVE_IDE (
-        .clock              (clock),
-        .reset              (reset),
-
-        .ide_cs1fx_n        (ide0_cs1fx),
-        .ide_cs3fx_n        (ide0_cs3fx),
-        .ide_io_read_n      (ide0_io_read_n  | enable_mmc_n),
-        .ide_io_write_n     (ide0_io_write_n | enable_mmc_n),
-
-        .ide_address        (ide0_address),
-        .ide_data_bus_in    (ide0_data_bus_out),
-        .ide_data_bus_out   (mmcide_readdata),
-
-        .device_master      (use_mmc == 2'b01),
-
-        .spi_clk            (spi_clk),
-        .spi_cs             (spi_cs),
-        .spi_mosi           (spi_mosi),
-        .spi_miso           (spi_miso)
-
-    );
-
-    assign ide0_data_bus_in = ~ide_ignore ? ide_readdata : mmcide_readdata;
-
-
-    //
     // FDC
     //
     logic           mgmt_fdd_cs;
@@ -1334,7 +1186,7 @@ end
     //
     // mgmt_readdata
     //
-    assign mgmt_readdata = mgmt_ide0_cs ? mgmt_ide0_readdata : mgmt_fdd_readdata;
+    assign mgmt_readdata = mgmt_fdd_readdata;
 
 
     //
@@ -1485,11 +1337,6 @@ end
         begin
             data_bus_out_from_chipset <= 1'b1;
             data_bus_out <= joy_data;
-        end
-        else if ((~ide0_chip_select_n) && (~io_read_n))
-        begin
-            data_bus_out_from_chipset <= 1'b1;
-            data_bus_out <= xt2ide0_data_bus_out;
         end
         else if ((~floppy0_chip_select_n || fdd_dma_read) && (~io_read_n))
         begin

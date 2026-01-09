@@ -218,11 +218,6 @@ module emu
 		"S1,IMGIMAVFD,Floppy B:;",
 		"OJK,Write Protect,None,A:,B:,A: & B:;",
 		"-;",
-		"S2,VHD,IDE 0-0;",
-		"S3,VHD,IDE 0-1;",
-		"OLM,2nd SD card,Disable,IDE 0-0,IDE 0-1;",
-		"-;",
-		"-;",
 		"P1,System & BIOS;",
 		"P1-;",
 		"P1O7,Boot Splash Screen,Yes,No;",
@@ -362,7 +357,7 @@ module emu
     wire        mgmt_rd;
     wire        mgmt_wr;
     wire  [7:0] mgmt_req;
-    assign mgmt_req[5:3] = 3'b000;
+    assign mgmt_req[5:0] = 6'b000000;
 
     wire [35:0] EXT_BUS;
     hps_ext hps_ext  
@@ -1153,11 +1148,6 @@ module emu
 		.ems_enabled                        (ems_enabled_sel),
 		.ems_address                        (ems_address_sel),
 		.bios_protect_flag                  (bios_protect_flag),
-		.use_mmc                            (use_mmc),
-		.spi_clk                            (spi_clk),
-		.spi_cs                             (spi_cs),
-		.spi_mosi                           (spi_mosi),
-		.spi_miso                           (spi_miso),
 		.mgmt_readdata                      (mgmt_din),
 		.mgmt_writedata                     (mgmt_dout),
 		.mgmt_address                       (mgmt_addr),
@@ -1166,7 +1156,6 @@ module emu
 		.floppy_wp                          (status[20:19]),
 		.fdd_present                        (fdd_present),
 		.fdd_request                        (mgmt_req[7:6]),
-		.ide0_request                       (mgmt_req[2:0]),
 		.xtctl                              (xtctl),
 		.enable_a000h                       (a000h),
 		.wait_count_clk_en                  (~clk_cpu & clk_cpu_ff_2),
@@ -1374,26 +1363,6 @@ module emu
     wire uart2_cts = USER_IN[3];
     wire uart2_dsr = USER_IN[5];
     wire uart2_dcd = USER_IN[6];
-
-    //
-    ///////////////////////   MMC     ///////////////////////
-    //
-    logic [1:0]  use_mmc;
-    logic spi_clk;
-    logic spi_cs;
-    logic spi_mosi;
-    logic spi_miso;
-
-    always @(posedge clk_chipset)
-        if (reset)
-            use_mmc <= status[22:21];
-        else
-            use_mmc <= use_mmc;
-
-    assign  SD_SCK      = spi_clk;
-    assign  SD_MOSI     = spi_mosi;
-    assign  spi_miso    = SD_MISO;
-    assign  SD_CS       = spi_cs;
 
     //
     ///////////////////////   VIDEO   ///////////////////////

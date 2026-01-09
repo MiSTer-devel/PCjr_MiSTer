@@ -38,5 +38,5 @@ If using Git, this can be done using **git clone https://github.com/skiselev/808
   
 Assuming that you have TL866xx series programmer connected to your computer, you can use **minipro** command to program the resulting ***.rom** image to the Flash ROM:
 * **minipro -p <FLASH_ROM_TYPE> -w <BIOS.rom>**
-* For example, assuming that SST39SF010A Flash ROM is used and Micro 8088 image is to be programmed, use: **minipro -p SST39SF010A -w bios-micro8088-xtide.rom**
+* For example, assuming that SST39SF010A Flash ROM is used and Micro 8088 image is to be programmed, use: **minipro -p SST39SF010A -w bios-micro8088-noide.rom**
 * Some other 128 KiB parallel Flash ROMs supported by minipro: SST29EE010, AT29C010A, WW29EE011, "AM29F010 @DIP32"
