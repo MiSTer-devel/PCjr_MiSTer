@@ -379,7 +379,8 @@ module PERIPHERALS #(
         pcjr_keybd_in,
         timer_counter_out[2],
         timer_counter_out[2],
-        port_c_in[3:0]
+        port_c_in[3:1],
+        keybd_latch
     };
     wire    [7:0]   port_c_in_mux = pcjr_mode ? pcjr_port_c_in : port_c_in;
 
