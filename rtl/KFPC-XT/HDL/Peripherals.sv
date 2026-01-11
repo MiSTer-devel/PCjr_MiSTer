@@ -371,8 +371,10 @@ module PERIPHERALS #(
     logic   [7:0]   ppi_data_bus_out;
     logic   [7:0]   port_a_in;
     logic           prev_keybord_irq;
+    logic           prev_pcjr_keybd_in;
     logic           keybd_latch;
-    wire            pcjr_keybd_in = 1'b1; // IR keyboard idle-high placeholder
+    logic           pcjr_kbd_data;
+    wire            pcjr_keybd_in = ~pcjr_kbd_data;
     wire            pcjr_cable_connected_n = 1'b0;
     wire    [7:0]   pcjr_port_c_in = {
         pcjr_cable_connected_n,
@@ -424,7 +426,8 @@ module PERIPHERALS #(
     logic           swap_video_buffer_1;
     logic           swap_video_buffer_2;
 
-    wire    clear_keycode = port_b_out[7];
+    logic   pcjr_clear_keycode;
+    wire    clear_keycode = pcjr_mode ? pcjr_clear_keycode : port_b_out[7];
     wire    ps2_reset_n   = ~tandy_video ? port_b_out[6] : 1'b1;
 
     always_ff @(posedge clock, posedge reset)
@@ -458,19 +461,129 @@ module PERIPHERALS #(
 
     assign  keycode = ps2_reset_n ? keycode_buf : 8'h80;
 
+    // PCjr IR keyboard encoder
+    localparam [15:0] PCJR_BIT_PHASE_CYCLE = 16'd22000 - 16'd1;
+    logic   [9:0]   pcjr_shift_register;
+    logic   [3:0]   pcjr_send_count;
+    logic           pcjr_shift;
+    logic   [15:0]  pcjr_phase_cycle_count;
+    logic           pcjr_bit_1_signal;
+    wire            pcjr_bit_0_signal = ~pcjr_bit_1_signal;
+    wire            pcjr_sending = |pcjr_send_count;
+    wire    [1:0]   pcjr_send_code = {pcjr_sending, pcjr_shift_register[0]};
+
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset)
+            pcjr_shift_register <= 10'b1111111111;
+        else if (~pcjr_mode)
+            pcjr_shift_register <= 10'b1111111111;
+        else if (pcjr_shift)
+            pcjr_shift_register <= {1'b1, pcjr_shift_register[9:1]};
+        else if (~pcjr_sending & keybord_irq)
+            pcjr_shift_register <= {1'b1, keycode_buf, 1'b1};
+        else
+            pcjr_shift_register <= pcjr_shift_register;
+    end
+
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset)
+        begin
+            pcjr_send_count     <= 4'd0;
+            pcjr_shift          <= 1'b0;
+            pcjr_clear_keycode  <= 1'b0;
+        end
+        else if (~pcjr_mode)
+        begin
+            pcjr_send_count     <= 4'd0;
+            pcjr_shift          <= 1'b0;
+            pcjr_clear_keycode  <= 1'b0;
+        end
+        else if (~|pcjr_phase_cycle_count)
+        begin
+            if (|pcjr_send_count)
+            begin
+                pcjr_send_count     <= pcjr_send_count - 4'd1;
+                pcjr_clear_keycode  <= 1'b0;
+                pcjr_shift          <= 1'b1;
+            end
+            else if (keybord_irq)
+            begin
+                pcjr_send_count     <= 4'd10;
+                pcjr_clear_keycode  <= 1'b1;
+                pcjr_shift          <= 1'b0;
+            end
+            else
+            begin
+                pcjr_send_count     <= pcjr_send_count;
+                pcjr_clear_keycode  <= 1'b0;
+                pcjr_shift          <= 1'b0;
+            end
+        end
+        else
+        begin
+            pcjr_send_count     <= pcjr_send_count;
+            pcjr_clear_keycode  <= 1'b0;
+            pcjr_shift          <= 1'b0;
+        end
+    end
+
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset)
+            pcjr_phase_cycle_count <= PCJR_BIT_PHASE_CYCLE;
+        else if (~pcjr_mode)
+            pcjr_phase_cycle_count <= PCJR_BIT_PHASE_CYCLE;
+        else if (~|pcjr_phase_cycle_count)
+            pcjr_phase_cycle_count <= PCJR_BIT_PHASE_CYCLE;
+        else
+            pcjr_phase_cycle_count <= pcjr_phase_cycle_count - 1'd1;
+    end
+
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset)
+            pcjr_bit_1_signal <= 1'b1;
+        else if (~pcjr_mode)
+            pcjr_bit_1_signal <= 1'b1;
+        else if (pcjr_phase_cycle_count == PCJR_BIT_PHASE_CYCLE)
+            pcjr_bit_1_signal <= 1'b0;
+        else if (pcjr_phase_cycle_count == {1'b0, PCJR_BIT_PHASE_CYCLE[15:1]})
+            pcjr_bit_1_signal <= 1'b1;
+        else
+            pcjr_bit_1_signal <= pcjr_bit_1_signal;
+    end
+
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset)
+            pcjr_kbd_data <= 1'b1;
+        else if (~pcjr_mode)
+            pcjr_kbd_data <= 1'b1;
+        else
+            casez (pcjr_send_code)
+                2'b10:  pcjr_kbd_data <= pcjr_bit_0_signal;
+                2'b11:  pcjr_kbd_data <= pcjr_bit_1_signal;
+                default:pcjr_kbd_data <= 1'b1;
+            endcase
+    end
+
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
         begin
             prev_keybord_irq <= 1'b0;
+            prev_pcjr_keybd_in <= 1'b1;
             keybd_latch      <= 1'b0;
         end
         else if (pcjr_mode)
         begin
             prev_keybord_irq <= keybord_irq;
+            prev_pcjr_keybd_in <= pcjr_keybd_in;
             if (nmi_mask_register && (~io_read_n))
                 keybd_latch <= 1'b0;
-            else if (~prev_keybord_irq & keybord_irq)
+            else if (~prev_pcjr_keybd_in & pcjr_keybd_in)
                 keybd_latch <= 1'b1;
             else
                 keybd_latch <= keybd_latch;
@@ -478,6 +591,7 @@ module PERIPHERALS #(
         else
         begin
             prev_keybord_irq <= keybord_irq;
+            prev_pcjr_keybd_in <= 1'b1;
             keybd_latch      <= 1'b0;
         end
     end
