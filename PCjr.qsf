@@ -61,7 +61,6 @@ set_global_assignment -name SEED 1
 
 set_global_assignment -name SYSTEMVERILOG_FILE PCjr.sv
 
-source config.tcl
 source sys/sys.tcl
 source sys/sys_analog.tcl
 source files.qip

@@ -4,16 +4,6 @@
 //
 // Based on KFPC-XT written by @kitune-san
 //
-`ifndef SYSTEM_VARIANT_TANDY
-`define SYSTEM_VARIANT_TANDY 0
-`endif
-`ifndef ROM_VARIANT_TANDY
-`define ROM_VARIANT_TANDY `SYSTEM_VARIANT_TANDY
-`endif
-`ifndef ROM_IS_TANDY
-`define ROM_IS_TANDY `ROM_VARIANT_TANDY
-`endif
-
 module RAM (
     input   logic           clock,
     input   logic           reset,
@@ -79,17 +69,16 @@ module RAM (
     // RAM Address Select (0x00000-0xAFFFF and 0xC0000-0xFFFFF)
     //
     assign ram_address_select_n = ~(enable_sdram && ~(address[19:16] == 4'b1011) &&  // B0000h reserved for VRAM
-	                               ~(~enable_a000h && address[19:16] == 4'b1010));    // A0000h is optional
+	                               ~(address[19:16] == 4'b1010));                     // A0000h is disabled
 	 
 
-    assign tandy_bios_select    = `ROM_IS_TANDY ? (tandy_bios_flag & (address[19:16] == 4'b1111)) : 1'b0;
+    assign tandy_bios_select    = tandy_bios_flag & (address[19:16] == 4'b1111);
 
 
     //
     // Write protect
     //
-    assign write_protect = bios_protect_flag[1] & (address[19:16] == 4'b1111)
-                         | bios_protect_flag[0] & (address[19:14] == 6'b111011);
+    assign write_protect = bios_protect_flag[1] & (address[19:16] == 4'b1111);
 
 
     //
@@ -97,16 +86,7 @@ module RAM (
     //
     // Address
     always_comb begin
-        if (ems_b1)
-            latch_address   = {1'b1, map_ems[0], address[13:0]};
-        else if (ems_b2)
-            latch_address   = {1'b1, map_ems[1], address[13:0]};
-        else if (ems_b3)
-            latch_address   = {1'b1, map_ems[2], address[13:0]};
-        else if (ems_b4)
-            latch_address   = {1'b1, map_ems[3], address[13:0]};
-        else
-            latch_address   = {1'b0, tandy_bios_select, address};
+        latch_address   = {1'b0, tandy_bios_select, address};
     end
 
     // Data

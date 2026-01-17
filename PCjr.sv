@@ -16,46 +16,6 @@
 //
 //============================================================================
 
-`ifndef SYSTEM_VARIANT_TANDY
-`define SYSTEM_VARIANT_TANDY 0
-`endif
-`ifndef ROM_VARIANT_TANDY
-`define ROM_VARIANT_TANDY `SYSTEM_VARIANT_TANDY
-`endif
-`ifndef ROM_IS_TANDY
-`define ROM_IS_TANDY `ROM_VARIANT_TANDY
-`endif
-`ifndef CONF_STR_SYSTEM
-`define CONF_STR_SYSTEM (`SYSTEM_VARIANT_TANDY ? "PCjr;UART115200:115200;" : "PCXT;UART115200:115200;")
-`endif
-`ifndef ENABLE_TANDY_VIDEO
-`define ENABLE_TANDY_VIDEO 0
-`endif
-`ifndef ENABLE_TANDY_AUDIO
-`define ENABLE_TANDY_AUDIO 0
-`endif
-`ifndef ENABLE_TANDY_KBD
-`define ENABLE_TANDY_KBD 0
-`endif
-`ifndef ENABLE_A000_UMB
-`define ENABLE_A000_UMB 0
-`endif
-`ifndef ENABLE_CGA
-`define ENABLE_CGA 1
-`endif
-`ifndef ENABLE_HGC
-`define ENABLE_HGC 0
-`endif
-`ifndef ENABLE_OPL2
-`define ENABLE_OPL2 0
-`endif
-`ifndef ENABLE_CMS
-`define ENABLE_CMS 0
-`endif
-`ifndef ENABLE_EMS
-`define ENABLE_EMS 0
-`endif
-
 module emu
     (
         //Master input clock
@@ -248,16 +208,12 @@ module emu
 
 	`include "build_id.v"
 
-    localparam CONF_STR_HGC = ((`ENABLE_HGC && `ENABLE_CGA) ? "P1oC,PCXT CGA Graphics,Yes,No;P1oD,PCXT Hercules Graphics,Yes,No;P1O4,PCXT 1st Video,CGA,Hercules;P1-;" : "");
-    localparam CONF_STR_ROM = (`ROM_IS_TANDY ? "P1FC1,ROM,PCjr BIOS:;P1-;" : "P1FC0,ROM,PCXT BIOS:;");
-    localparam CONF_STR_CMS = (`ENABLE_CMS ? "P2OA,C/MS Audio,Enabled,Disabled;" : "");
-    localparam CONF_STR_OPL2 = (`ENABLE_OPL2 ? "P2oAB,OPL2,Adlib 388h,SB FM 388h/228h, Disabled;" : "");
-    localparam CONF_STR_TANDY_AUDIO = (`ENABLE_TANDY_AUDIO ? "P2o23,Tandy Volume,1,2,3,4;" : "");
-    localparam CONF_STR_EMS = (`ENABLE_EMS ? "P3OB,Lo-tech 2MB EMS,Enabled,Disabled;P3OCD,EMS Frame,C000,D000,E000;P3-;" : "");
-    localparam CONF_STR_A000 = (`ENABLE_A000_UMB ? "P3o9,A000 UMB,Enabled,Disabled;P3-;" : "");
+    localparam CONF_STR_SYSTEM = "PCjr;UART115200:115200;";
+    localparam CONF_STR_ROM = "P1FC1,ROM,PCjr BIOS:;P1-;";
+    localparam CONF_STR_TANDY_AUDIO = "P2o23,Tandy Volume,1,2,3,4;";
 
     localparam CONF_STR = {
-		`CONF_STR_SYSTEM,
+		CONF_STR_SYSTEM,
 		"S0,IMGIMAVFD,Floppy A:;",
 		"S1,IMGIMAVFD,Floppy B:;",
 		"OJK,Write Protect,None,A:,B:,A: & B:;",
@@ -266,22 +222,17 @@ module emu
 		"S3,VHD,IDE 0-1;",
 		"OLM,2nd SD card,Disable,IDE 0-0,IDE 0-1;",
 		"-;",
-		"OHI,CPU Speed,4.77MHz,7.16MHz,9.54MHz,PC/AT 3.5MHz;",
 		"-;",
 		"P1,System & BIOS;",
 		"P1-;",
-		CONF_STR_HGC,
 		"P1O7,Boot Splash Screen,Yes,No;",
 		"P1-;",
 		CONF_STR_ROM,
-		"P1FC2,ROM,EC00 BIOS:;",
 		"P1-;",
-		"P1OUV,BIOS Writable,None,EC00,Main,All;",
+		"P1OU,BIOS Writable,No,Yes;",
 		"P1-;",	
 		"P2,Audio & Video;",
 		"P2-;",
-		CONF_STR_CMS,
-		CONF_STR_OPL2,
 		"P2o01,Speaker Volume,1,2,3,4;",
 		CONF_STR_TANDY_AUDIO,
 		"P2o45,Audio Boost,No,2x,4x;",
@@ -297,8 +248,6 @@ module emu
 		"P2-;",
 		"P3,Hardware;",
 		"P3-;",
-		CONF_STR_EMS,
-		CONF_STR_A000,
 		"P3ONO,Joystick 1, Analog, Digital, Disabled;",
 		"P3OPQ,Joystick 2, Analog, Digital, Disabled;",
 		"P3OR,Sync Joy to CPU Speed,No,Yes;",
@@ -345,10 +294,9 @@ module emu
     wire [2:0] screen_mode = status[16:14];
     wire [1:0] ar = status[9:8];
     wire border = status[29] | xtctl[1];
-    wire a000h = `ENABLE_A000_UMB ? (~status[41] & ~xtctl[6]) : 1'b0;
+    wire a000h = 1'b0;
 
     reg [1:0]   scale_video_ff;
-    reg         hgc_mode_video_ff;
     reg [2:0]   screen_mode_video_ff;
     reg         border_video_ff;
     reg         cga_hw;
@@ -358,21 +306,17 @@ module emu
     wire std_hsyncwidth;
     wire pause_core;
     wire swap_video;
-    wire swap_video_eff = `ENABLE_HGC ? (`ENABLE_CGA ? swap_video : (`ENABLE_TANDY_VIDEO ? 1'b0 : 1'b1)) : 1'b0;
 
     always @(posedge CLK_VIDEO)
     begin
         scale_video_ff          <= scale;
         screen_mode_video_ff    <= screen_mode;
         border_video_ff         <= border;
-        cga_hw                  <= `ENABLE_CGA ? (~status[44] | tandy_video_mode) : 1'b0;
-        hercules_hw             <= `ENABLE_HGC ? (`ENABLE_CGA ? ~status[45] : 1'b1) : 1'b0;
+        cga_hw                  <= 1'b1;
+        hercules_hw             <= 1'b0;
         VIDEO_ARX               <= (!ar) ? 12'd4 : (ar - 1'd1);
         VIDEO_ARY               <= (!ar) ? 12'd3 : 12'd0;
     end
-
-    always @(posedge clk_chipset)
-        hgc_mode_video_ff       <= `ENABLE_HGC ? hgc_mode : 1'b0;
 
     hps_io #(.CONF_STR(CONF_STR), .PS2DIV(2000), .PS2WE(1), .WIDE(1)) hps_io 
 	(
@@ -534,12 +478,8 @@ module emu
     begin
         if (reset)
             clk_select  <= 2'b00;
-
-        else if (biu_done)
-            clk_select  <= (xtctl[3:2] == 2'b00 & ~xtctl[7]) ? status[18:17] : xtctl[7] ? 2'b11 : xtctl[3:2] - 2'b01;
-
         else
-            clk_select  <= clk_select;
+            clk_select  <= 2'b00;
 
     end
 
@@ -661,14 +601,12 @@ module emu
             reset_cpu_ff <= reset;
     end
 
-    localparam tandy_video_mode = `ENABLE_TANDY_VIDEO;
-    reg hgc_mode = 0;
+    localparam tandy_video_mode = 1'b1;
 
     always @(negedge clk_chipset, posedge reset)
     begin
         if (reset)
         begin
-            hgc_mode <= `ENABLE_HGC ? (`ENABLE_CGA ? status[4] : 1'b1) : 1'b0;
             reset_cpu <= 1'b1;
             reset_cpu_count <= 16'h0000;
         end
@@ -732,16 +670,14 @@ module emu
     reg [7:0]  bios_write_wait_cnt;
     reg        bios_write_byte_cnt;
     reg        tandy_bios_write;
-    wire select_pcxt  = (ioctl_index[5:0] == 0) && (ioctl_addr[24:16] == 9'b000000000);
-    wire select_tandy = `ROM_IS_TANDY ? (ioctl_index[5:0] == 1) && (ioctl_addr[24:16] == 9'b000000000) : 1'b0;
-    wire select_xtide = ioctl_index == 2;
+    wire       bios_writable = status[30];
+    wire [1:0] bios_protect_default = {~bios_writable, 1'b0};
+    wire select_tandy = (ioctl_index[5:0] == 1) && (ioctl_addr[24:16] == 9'b000000000);
 
-    wire [19:0] bios_access_address_wire = select_pcxt  ? { 4'b1111, ioctl_addr[15:0]} :
-         select_tandy ? { 4'b1111, ioctl_addr[15:0]} :
-         select_xtide ? { 6'b111011, ioctl_addr[13:0]} :
+    wire [19:0] bios_access_address_wire = select_tandy ? { 4'b1111, ioctl_addr[15:0]} :
          20'hFFFFF;
 
-    wire bios_load_n = ~(ioctl_download & (select_pcxt | select_tandy | select_xtide));
+    wire bios_load_n = ~(ioctl_download & select_tandy);
 
     always @(posedge clk_chipset, posedge reset_sdram)
     begin
@@ -775,7 +711,7 @@ module emu
             casez (bios_load_state)
                 4'h00:
                 begin
-                    bios_protect_flag   <= ~status[31:30];  // bios_writable
+                    bios_protect_flag   <= bios_protect_default;  // bios_writable
                     bios_access_address <= 20'hFFFFF;
                     bios_write_data     <= 16'hFFFF;
                     bios_write_n        <= 1'b1;
@@ -1075,19 +1011,19 @@ module emu
     wire    [5:0]   sw_base;
     wire    [1:0]   sw_floppy;
 
-    assign  sw_base = `ENABLE_HGC ? (hgc_mode ? 6'b111101 : 6'b101101) : 6'b101101;
+    assign  sw_base = 6'b101101;
     assign  sw_floppy = fdd_present[1] ? 2'b01 : 2'b00;
     assign  sw = {sw_floppy, sw_base}; // DIP switches (CGA and floppy count)
     assign  port_c_in[3:0] = port_b_out[3] ? sw[7:4] : sw[3:0];
 
-    wire tandy_bios_flag = bios_write_n ? `ROM_IS_TANDY : tandy_bios_write;
+    wire tandy_bios_flag = bios_write_n ? 1'b1 : tandy_bios_write;
 
-    wire video_output_sel = `ENABLE_HGC ? hgc_mode_video_ff : 1'b0;
-    wire enable_hgc_sel = `ENABLE_HGC ? 1'b1 : 1'b0;
-    wire [1:0] hgc_rgb_sel = `ENABLE_HGC ? 2'b10 : 2'b00;
-    wire hercules_hw_sel = `ENABLE_HGC ? hercules_hw : 1'b0;
-    wire ems_enabled_sel = `ENABLE_EMS ? ~status[11] : 1'b0;
-    wire [1:0] ems_address_sel = `ENABLE_EMS ? status[13:12] : 2'b00;
+    wire video_output_sel = 1'b0;
+    wire enable_hgc_sel = 1'b0;
+    wire [1:0] hgc_rgb_sel = 2'b00;
+    wire hercules_hw_sel = hercules_hw;
+    wire ems_enabled_sel = 1'b0;
+    wire [1:0] ems_address_sel = 2'b00;
 
     always @(posedge clk_chipset)
     begin
@@ -1119,7 +1055,7 @@ module emu
 		.composite                          (composite),
 		.video_output                       (video_output_sel),
 		.clk_vga_cga                        (clk_28_636),
-		.enable_cga                         (`ENABLE_CGA),
+		.enable_cga                         (1'b1),
 		.clk_vga_hgc                        (clk_56_875),
 		.enable_hgc                         (enable_hgc_sel),
 		.hgc_rgb                            (hgc_rgb_sel),
@@ -1178,8 +1114,8 @@ module emu
 		.joya1                              (status[28] ? joya0 : joya1),
 		.jtopl2_snd_e                       (jtopl2_snd_e),
 		.tandy_snd_e                        (tandy_snd_e),
-		.opl2_io                            (xtctl[4] ? 2'b10 : status[43:42]),
-		.cms_en                             (~status[10]),
+		.opl2_io                            (2'b00),
+		.cms_en                             (1'b0),
 		.o_cms_l                            (cms_l_snd_e),
 		.o_cms_r                            (cms_r_snd_e),
 		.tandy_video                        (tandy_video_mode),
@@ -1281,14 +1217,11 @@ module emu
     //
 
     wire [15:0] cms_l_snd_e;
-    wire [16:0] cms_l_snd = {cms_l_snd_e[15],cms_l_snd_e};
     wire [15:0] cms_r_snd_e;
-    wire [16:0] cms_r_snd = {cms_r_snd_e[15],cms_r_snd_e};
 	 
     wire [15:0] jtopl2_snd_e;
-    wire [16:0] jtopl2_snd = {jtopl2_snd_e[15], jtopl2_snd_e};
     wire [10:0] tandy_snd_e;
-    wire [16:0] tandy_snd = `ENABLE_TANDY_AUDIO ? {{{2{tandy_snd_e[10]}}, {4{tandy_snd_e[10]}}, tandy_snd_e} << status[35:34], 2'b00} : 17'd0;
+    wire [16:0] tandy_snd = {{{2{tandy_snd_e[10]}}, {4{tandy_snd_e[10]}}, tandy_snd_e} << status[35:34], 2'b00};
     wire [16:0] spk_vol =  {2'b00, {3'b000,~speaker_out} << status[33:32], 11'd0};
     wire        speaker_out;
 
@@ -1320,7 +1253,7 @@ module emu
     begin
         reg [16:0] tmp_l;
 
-        tmp_l <= jtopl2_snd + cms_l_snd + tandy_snd + spk_vol;
+        tmp_l <= tandy_snd + spk_vol;
 
         // clamp the output
         out_l <= (^tmp_l[16:15]) ? {tmp_l[16], {15{tmp_l[15]}}} : tmp_l[15:0];
@@ -1334,7 +1267,7 @@ module emu
     begin
         reg [16:0] tmp_r;
 
-        tmp_r <= jtopl2_snd + cms_r_snd + tandy_snd + spk_vol;
+        tmp_r <= tandy_snd + spk_vol;
 
         // clamp the output
         out_r <= (^tmp_r[16:15]) ? {tmp_r[16], {15{tmp_r[15]}}} : tmp_r[15:0];
@@ -1466,13 +1399,10 @@ module emu
     wire VBlank;
     wire VSync;
     wire ce_pixel_cga;
-    wire ce_pixel_hgc;
     wire de_o;
     wire [5:0] r, g, b;
     reg [7:0] raux_cga, gaux_cga, baux_cga;
-    reg [7:0] raux_hgc, gaux_hgc, baux_hgc;
-	 wire [7:0] VGA_R_AUX, VGA_G_AUX, VGA_B_AUX;
-    wire CLK_VIDEO_HGC;
+    wire [7:0] VGA_R_AUX, VGA_G_AUX, VGA_B_AUX;
     wire CLK_VIDEO_CGA;
     wire CE_PIXEL_CREDITS;
 
@@ -1485,47 +1415,14 @@ module emu
     wire [21:0] gamma_bus_cga;
     wire        CE_PIXEL_cga;
 
-    wire  [7:0] VGA_R_hgc;
-    wire  [7:0] VGA_G_hgc;
-    wire  [7:0] VGA_B_hgc;
-    wire        VGA_HS_hgc;
-    wire        VGA_VS_hgc;
-    wire        VGA_DE_hgc;
-    wire [21:0] gamma_bus_hgc;
-    wire        CE_PIXEL_hgc;
-    reg  [1:0]  ce_pixel_hgc_div = 2'b0;
-    reg         ce_pixel_hgc_56 = 1'b0;
-    reg  [5:0]  hgc_r_meta, hgc_g_meta, hgc_b_meta;
-    reg  [5:0]  hgc_r_sync, hgc_g_sync, hgc_b_sync;
-    reg         hgc_hs_meta, hgc_vs_meta;
-    reg         hgc_hs_sync, hgc_vs_sync;
-    reg         hgc_hb_meta, hgc_vb_meta;
-    reg         hgc_hb_sync, hgc_vb_sync;
-    reg  [7:0]  VGA_R_hgc_56, VGA_G_hgc_56, VGA_B_hgc_56;
-    reg         VGA_HS_hgc_56, VGA_VS_hgc_56, VGA_DE_hgc_56;
-    reg         ce_pixel_hgc_prev = 1'b0;
-    reg         ce_pixel_hgc_tog = 1'b0;
-    reg         ce_pixel_hgc_tog_1 = 1'b0;
-    reg         ce_pixel_hgc_tog_2 = 1'b0;
-    wire        CE_PIXEL_hgc_sync;
-
     assign CLK_VIDEO = clk_56_875;
-    assign CLK_VIDEO_HGC = clk_113_750;
     assign CLK_VIDEO_CGA = clk_56_875;
-    assign ce_pixel_hgc = ce_pixel_hgc_div[1];
-
-    always @(posedge clk_113_750)
-        if (`ENABLE_HGC)
-            ce_pixel_hgc_div <= ce_pixel_hgc_div + 2'd1;
-        else
-            ce_pixel_hgc_div <= 2'd0;
 
     assign VGA_SL = {scale_video_ff==3, scale_video_ff==2};
 
     wire   scandoubler = (scale_video_ff>0); //|| forced_scandoubler);
 
     reg [14:0] HBlank_del;
-    reg [24:0] HBlank_del_hgc;
     wire tandy_16_gfx;
     wire tandy_color_16;
     wire color = (screen_mode_video_ff == 3'd0);
@@ -1535,17 +1432,12 @@ module emu
     reg [10:0] HBlank_counter = 0;
     reg HBlank_fixed = 1'b1;
     reg [1:0] HSync_del = 1'b11;
-    reg [1:0] HSync_del_hgc = 1'b11;
-    localparam integer MDA_VSYNC_DELAY = 19;
-    reg [MDA_VSYNC_DELAY:0] VSync_line;
     reg        video_pause_core_buf;
     reg        video_pause_core;
 
     always_comb
     begin
-        if (swap_video_eff)
-            HBlank_VGA = HBlank_del_hgc[24];
-        else if (tandy_color_16)
+        if (tandy_color_16)
             HBlank_VGA = HBlank_del[11];
         else if (tandy_16_gfx)
             HBlank_VGA = HBlank_del[9];
@@ -1572,23 +1464,7 @@ module emu
         end
     end
 
-    always @(posedge clk_56_875)
-    begin
-        if (swap_video_eff)
-        begin
-            HBlank_del_hgc <= {HBlank_del_hgc[23:0], HBlank};
-            HSync_del_hgc <= {HSync_del_hgc[0], HSync};
-            if (HSync_del_hgc == 2'b01)
-                VSync_line <= {VSync_line[MDA_VSYNC_DELAY-1:0], VSync};
-        end
-    end
-
     // Credits overlay expects a pixel enable synchronous to clk_56_875.
-    always @(posedge clk_56_875)
-        if (`ENABLE_HGC)
-            ce_pixel_hgc_56 <= ~ce_pixel_hgc_56;
-        else
-            ce_pixel_hgc_56 <= 1'b0;
 
     always @ (posedge clk_56_875) begin
         video_pause_core_buf    <= pause_core;
@@ -1611,22 +1487,6 @@ module emu
 		.B_OUT(baux_cga)
 	);
 
-    video_monochrome_converter video_mono_hgc
-	(
-		.clk_vid(CLK_VIDEO_HGC),
-		.ce_pix(ce_pixel_hgc),
-
-		.R({hgc_r_sync, 2'b00}),
-		.G({hgc_g_sync, 2'b00}),
-		.B({hgc_b_sync, 2'b00}),
-
-		.gfx_mode(screen_mode_video_ff),
-
-		.R_OUT(raux_hgc),
-		.G_OUT(gaux_hgc),
-		.B_OUT(baux_hgc)
-	);
-
     /*
     assign VGA_R = raux;
     assign VGA_G = gaux;
@@ -1637,9 +1497,8 @@ module emu
     assign CE_PIXEL = ce_pixel;
     */
 
-    wire LHBL = (~swap_video_eff && border_video_ff) ? HBlank_fixed : HBlank_VGA;
-    wire LVBL = (~swap_video_eff && border_video_ff) ? std_hsyncwidth ? VGA_VBlank_border : ~VSync : VBlank;
-    wire VSync_hgc = VSync_line[MDA_VSYNC_DELAY];
+    wire LHBL = border_video_ff ? HBlank_fixed : HBlank_VGA;
+    wire LVBL = border_video_ff ? (std_hsyncwidth ? VGA_VBlank_border : ~VSync) : VBlank;
 
     wire       pre2x_LHBL, pre2x_LVBL;
     wire [7:0] pre2x_r, pre2x_g, pre2x_b;
@@ -1677,102 +1536,20 @@ module emu
 
 	);
 
-    always @(posedge clk_113_750)
-    begin
-        if (ce_pixel_hgc)
-        begin
-            hgc_r_meta  <= r;
-            hgc_g_meta  <= g;
-            hgc_b_meta  <= b;
-            hgc_hs_meta <= HSync;
-            hgc_vs_meta <= VSync_hgc;
-            hgc_hb_meta <= pre2x_LHBL;
-            hgc_vb_meta <= pre2x_LVBL;
-
-            hgc_r_sync  <= hgc_r_meta;
-            hgc_g_sync  <= hgc_g_meta;
-            hgc_b_sync  <= hgc_b_meta;
-            hgc_hs_sync <= hgc_hs_meta;
-            hgc_vs_sync <= hgc_vs_meta;
-            hgc_hb_sync <= hgc_hb_meta;
-            hgc_vb_sync <= hgc_vb_meta;
-        end
-    end
-
-    video_mixer #(.GAMMA(0)) video_mixer_hgc
-	(
-		.*,
-
-		.CLK_VIDEO(CLK_VIDEO_HGC),
-		.CE_PIXEL(CE_PIXEL_hgc),
-		.ce_pix(ce_pixel_hgc),
-
-		.freeze_sync(),
-
-		.R(raux_hgc),
-		.G(gaux_hgc),
-		.B(baux_hgc),
-
-		.HBlank(hgc_hb_sync),
-		.VBlank(hgc_vb_sync),
-		.HSync(hgc_hs_sync),
-		.VSync(hgc_vs_sync),
-
-		.scandoubler(scandoubler),
-		.hq2x(scale_video_ff==1),
-		.gamma_bus(gamma_bus_hgc),
-
-		.VGA_R(VGA_R_hgc),
-		.VGA_G(VGA_G_hgc),
-		.VGA_B(VGA_B_hgc),
-		.VGA_VS(VGA_VS_hgc),
-		.VGA_HS(VGA_HS_hgc),
-		.VGA_DE(VGA_DE_hgc)
-
-	);
-
-    always @(posedge clk_113_750)
-    begin
-        ce_pixel_hgc_prev <= CE_PIXEL_hgc;
-        if (CE_PIXEL_hgc && ~ce_pixel_hgc_prev)
-            ce_pixel_hgc_tog <= ~ce_pixel_hgc_tog;
-    end
-
-    always @(posedge clk_56_875)
-    begin
-        ce_pixel_hgc_tog_1 <= ce_pixel_hgc_tog;
-        ce_pixel_hgc_tog_2 <= ce_pixel_hgc_tog_1;
-    end
-
-    assign CE_PIXEL_hgc_sync = ce_pixel_hgc_tog_1 ^ ce_pixel_hgc_tog_2;
-
-    always @(posedge clk_56_875)
-    begin
-        if (CE_PIXEL_hgc_sync)
-        begin
-            VGA_R_hgc_56 <= VGA_R_hgc;
-            VGA_G_hgc_56 <= VGA_G_hgc;
-            VGA_B_hgc_56 <= VGA_B_hgc;
-            VGA_HS_hgc_56 <= VGA_HS_hgc;
-            VGA_VS_hgc_56 <= VGA_VS_hgc;
-            VGA_DE_hgc_56 <= VGA_DE_hgc;
-        end
-    end
-
-    assign VGA_R_AUX  =  swap_video_eff ? VGA_R_hgc_56  : VGA_R_cga;
-    assign VGA_G_AUX  =  swap_video_eff ? VGA_G_hgc_56  : VGA_G_cga;
-    assign VGA_B_AUX  =  swap_video_eff ? VGA_B_hgc_56  : VGA_B_cga;
-    assign VGA_HS =  swap_video_eff ? VGA_HS_hgc_56 : VGA_HS_cga;
-    assign VGA_VS =  swap_video_eff ? VGA_VS_hgc_56 : VGA_VS_cga;
-    assign VGA_DE =  swap_video_eff ? VGA_DE_hgc_56 : VGA_DE_cga;
-    assign gamma_bus =  swap_video_eff ? gamma_bus_hgc : gamma_bus_cga;
-    assign CE_PIXEL  =  swap_video_eff ? CE_PIXEL_hgc_sync : CE_PIXEL_cga;
-    assign CE_PIXEL_CREDITS = swap_video_eff ? ce_pixel_hgc_56 : CE_PIXEL_cga;
+    assign VGA_R_AUX  = VGA_R_cga;
+    assign VGA_G_AUX  = VGA_G_cga;
+    assign VGA_B_AUX  = VGA_B_cga;
+    assign VGA_HS = VGA_HS_cga;
+    assign VGA_VS = VGA_VS_cga;
+    assign VGA_DE = VGA_DE_cga;
+    assign gamma_bus = gamma_bus_cga;
+    assign CE_PIXEL  = CE_PIXEL_cga;
+    assign CE_PIXEL_CREDITS = CE_PIXEL_cga;
 
 
 
-    wire credits_vb = swap_video_eff ? VBlank : LVBL;
-    wire credits_border = swap_video_eff ? 1'b0 : border_video_ff;
+    wire credits_vb = LVBL;
+    wire credits_border = border_video_ff;
 
     jtframe_credits #(
         .PAGES  (4),
