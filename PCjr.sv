@@ -1030,8 +1030,7 @@ module emu
     end
 
     CHIPSET #(
-        .clk_rate(cur_rate),
-        .pcjr_mode(1'b1)
+        .clk_rate(cur_rate)
     ) u_CHIPSET
 	(
 		.clock                              (clk_chipset),

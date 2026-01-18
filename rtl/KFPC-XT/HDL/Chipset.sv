@@ -5,8 +5,7 @@
 // Based on KFPC-XT written by @kitune-san
 //
 module CHIPSET #(
-        parameter clk_rate = 28'd50000000,
-        parameter pcjr_mode = 1'b0)
+        parameter clk_rate = 28'd50000000)
         (
         input   logic           clock,
         input   logic           cpu_clock,
@@ -276,8 +275,7 @@ module CHIPSET #(
     );
 
     PERIPHERALS #(
-        .clk_rate                           (clk_rate),
-        .pcjr_mode                          (pcjr_mode)
+        .clk_rate                           (clk_rate)
     ) u_PERIPHERALS 
     (
         .clock                              (clock),

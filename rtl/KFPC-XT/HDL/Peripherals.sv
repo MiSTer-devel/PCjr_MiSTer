@@ -6,8 +6,7 @@
 //
 module PERIPHERALS #(
         parameter ps2_over_time = 16'd1000,
-		parameter clk_rate = 28'd50000000,
-        parameter pcjr_mode = 1'b0
+		parameter clk_rate = 28'd50000000
     ) (
         input   logic           clock,
         input   logic           clk_sys,
@@ -384,7 +383,7 @@ module PERIPHERALS #(
         port_c_in[3:1],
         keybd_latch
     };
-    wire    [7:0]   port_c_in_mux = pcjr_mode ? pcjr_port_c_in : port_c_in;
+    wire    [7:0]   port_c_in_mux = pcjr_port_c_in;
 
     KF8255 u_KF8255 
     (
@@ -402,7 +401,7 @@ module PERIPHERALS #(
         .port_a_in                  (port_a_in),
         .port_a_out                 (port_a_out),
         .port_a_io                  (port_a_io),
-        .port_b_in                  (pcjr_mode ? 8'hFF : port_b_in),
+        .port_b_in                  (8'hFF),
         .port_b_out                 (port_b_out),
         .port_b_io                  (port_b_io),
         .port_c_in                  (port_c_in_mux),
@@ -427,7 +426,7 @@ module PERIPHERALS #(
     logic           swap_video_buffer_2;
 
     logic   pcjr_clear_keycode;
-    wire    clear_keycode = pcjr_mode ? pcjr_clear_keycode : port_b_out[7];
+    wire    clear_keycode = pcjr_clear_keycode;
     wire    ps2_reset_n   = ~tandy_video ? port_b_out[6] : 1'b1;
 
     always_ff @(posedge clock, posedge reset)
@@ -476,8 +475,6 @@ module PERIPHERALS #(
     begin
         if (reset)
             pcjr_shift_register <= 10'b1111111111;
-        else if (~pcjr_mode)
-            pcjr_shift_register <= 10'b1111111111;
         else if (pcjr_shift)
             pcjr_shift_register <= {1'b1, pcjr_shift_register[9:1]};
         else if (~pcjr_sending & keybord_irq)
@@ -489,12 +486,6 @@ module PERIPHERALS #(
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
-        begin
-            pcjr_send_count     <= 4'd0;
-            pcjr_shift          <= 1'b0;
-            pcjr_clear_keycode  <= 1'b0;
-        end
-        else if (~pcjr_mode)
         begin
             pcjr_send_count     <= 4'd0;
             pcjr_shift          <= 1'b0;
@@ -533,8 +524,6 @@ module PERIPHERALS #(
     begin
         if (reset)
             pcjr_phase_cycle_count <= PCJR_BIT_PHASE_CYCLE;
-        else if (~pcjr_mode)
-            pcjr_phase_cycle_count <= PCJR_BIT_PHASE_CYCLE;
         else if (~|pcjr_phase_cycle_count)
             pcjr_phase_cycle_count <= PCJR_BIT_PHASE_CYCLE;
         else
@@ -544,8 +533,6 @@ module PERIPHERALS #(
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
-            pcjr_bit_1_signal <= 1'b1;
-        else if (~pcjr_mode)
             pcjr_bit_1_signal <= 1'b1;
         else if (pcjr_phase_cycle_count == PCJR_BIT_PHASE_CYCLE)
             pcjr_bit_1_signal <= 1'b0;
@@ -558,8 +545,6 @@ module PERIPHERALS #(
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
-            pcjr_kbd_data <= 1'b1;
-        else if (~pcjr_mode)
             pcjr_kbd_data <= 1'b1;
         else
             casez (pcjr_send_code)
@@ -577,7 +562,7 @@ module PERIPHERALS #(
             prev_pcjr_keybd_in <= 1'b1;
             keybd_latch      <= 1'b0;
         end
-        else if (pcjr_mode)
+        else
         begin
             prev_keybord_irq <= keybord_irq;
             prev_pcjr_keybd_in <= pcjr_keybd_in;
@@ -588,15 +573,9 @@ module PERIPHERALS #(
             else
                 keybd_latch <= keybd_latch;
         end
-        else
-        begin
-            prev_keybord_irq <= keybord_irq;
-            prev_pcjr_keybd_in <= 1'b1;
-            keybd_latch      <= 1'b0;
-        end
     end
 
-    assign nmi_to_cpu = pcjr_mode ? (pcjr_nmi_enable & keybd_latch) : 1'b0;
+    assign nmi_to_cpu = pcjr_nmi_enable & keybd_latch;
 
 
     // Keyboard reset
@@ -715,8 +694,8 @@ end
         end
         else
         begin
-            keybord_interrupt_ff    <= pcjr_mode ? 1'b0 : keybord_irq;
-            keybord_interrupt       <= pcjr_mode ? 1'b0 : keybord_interrupt_ff;
+            keybord_interrupt_ff    <= 1'b0;
+            keybord_interrupt       <= 1'b0;
             uart_interrupt_ff       <= uart_irq;
             uart_interrupt          <= uart_interrupt_ff;
             uart2_interrupt_ff      <= uart2_irq;
@@ -754,7 +733,7 @@ end
             pcjr_nmi_enable <= 1'b0;
             ir_test_enable  <= 1'b0;
         end
-        else if (pcjr_mode && write_nmi_mask)
+        else if (write_nmi_mask)
         begin
             pcjr_nmi_enable <= internal_data_bus[7];
             ir_test_enable  <= internal_data_bus[6];
@@ -767,12 +746,12 @@ end
         if (reset)
         begin
             keycode_ff  <= 8'h00;
-            port_a_in   <= pcjr_mode ? 8'hFF : 8'h00;
+            port_a_in   <= 8'hFF;
         end
         else
         begin
             keycode_ff  <= tandy_keycode;
-            port_a_in   <= pcjr_mode ? 8'hFF : keycode_ff;
+            port_a_in   <= 8'hFF;
         end
     end
 
