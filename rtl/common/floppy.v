@@ -445,7 +445,7 @@ wire enter_result_phase =
 	cmd_get_status_start ||
 	cmd_read_id_finished;
 
-wire raise_interrupt = dma_irq_enable && (
+wire raise_interrupt_base = (
 	(cmd_read_write_start && (cmd_read_write_incorrect_head_at_start || cmd_read_write_incorrect_sector_at_start)) ||
 	(cmd_write_normal_start && cmd_write_and_writeprotected_at_start) ||
 	(state == S_CHECK_TC && (cmd_read_write_finish || cmd_format_finish)) ||
@@ -454,6 +454,8 @@ wire raise_interrupt = dma_irq_enable && (
 	delay_last_cycle ||
 	cmd_read_id_finished
 );
+
+wire raise_interrupt = pcjr_mode ? raise_interrupt_base : (dma_irq_enable && raise_interrupt_base);
 
 wire reset_changeline =
 	(cmd_read_write_ok_at_start) ||
@@ -564,7 +566,8 @@ reg pending_interrupt;
 always @(posedge clk) begin
 	if(~rst_n)               pending_interrupt <= 1'b0;
 	else if(raise_interrupt) pending_interrupt <= 1'b1;
-	else if(~irq)            pending_interrupt <= 1'b0;
+	else if(pcjr_mode && cmd_sense_interrupt_status_start) pending_interrupt <= 1'b0;
+	else if(!pcjr_mode && ~irq)            pending_interrupt <= 1'b0;
 end
 
 reg pending_interrupt_last;
