@@ -30,12 +30,14 @@ module cga_pixel(
     input vsync,
     input video_enabled,
     input[7:0] cga_color_reg,
-    input[3:0] tandy_palette_color,
-    input[3:0] tandy_newcolor,
-    input tandy_palette_set,
+    input palette_write,
+    input[3:0] palette_index,
+    input[3:0] palette_value,
     input[3:0] tandy_bordercol,
 	 input tandy_color_4,
 	 input tandy_color_16,
+    input pcjr_video,
+    input[3:0] pcjr_palette_mask,
     output[3:0] video
     );
 
@@ -65,10 +67,22 @@ module cga_pixel(
     reg[7:0] char_rom[0:4095];
     initial $readmemh("cga.hex", char_rom, 0, 4095);
 
+    wire [3:0] pcjr_pixel_index =
+        !grph_mode ? video_out :
+        tandy_color_16 ? video_out :
+        (mode_640 && !tandy_color_4) ? {3'b000, pix_640} :
+        {2'b00, video_out[2:1]};
+    wire [3:0] pcjr_masked_index = pcjr_pixel_index & pcjr_palette_mask;
+
     always_comb
     begin
         if (tandy_16_mode) begin
-				if (overscan)
+				if (pcjr_video) begin
+					if (overscan)
+						video = video_out;
+					else
+						video = tandy_palette[pcjr_masked_index];
+				end else if (overscan)
 					video = tandy_color_4 ? video_out : tandy_palette[video_out];
 				else if (tandy_color_4)
 					video = tandy_palette[{ 2'b00, video_out[2:1] }];
@@ -85,8 +99,8 @@ module cga_pixel(
     // at appropriate times
     always @ (posedge clk)
     begin
-	     if (tandy_palette_set)
-		     tandy_palette[tandy_palette_color] = tandy_newcolor;
+	     if (palette_write)
+		     tandy_palette[palette_index] = palette_value;
 			  
         if (vram_read_char) begin
             char_byte <= vram_data;

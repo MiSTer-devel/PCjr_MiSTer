@@ -44,7 +44,8 @@ module cga(
 
     input splashscreen,
     input thin_font,
-    input tandy_video,     
+    input tandy_video,
+    input [1:0] pcjr_addr_mode,
     output grph_mode,
     output hres_mode,
     output tandy_color_16,
@@ -74,23 +75,53 @@ module cga(
     wire[7:0] bus_out_crtc;
     wire[7:0] bus_out_mem;
     wire[7:0] cga_status_reg;
+    wire[7:0] pcjr_status_reg;
     reg[7:0] cga_control_reg = 8'b0010_1001; // (TEXT 80x25)
     //reg[7:0] cga_control_reg = 8'b0010_1010; // (GFX 320 x 200)
     reg[7:0] cga_color_reg = 8'b0000_0000;
     reg[7:0] tandy_color_reg = 8'b0000_0000;
-    reg[3:0] tandy_newcolor = 4'b0000;
     reg[3:0] tandy_bordercol = 4'b0000;
     reg[4:0] tandy_modesel = 5'b00000;
-    reg tandy_palette_set = 1'b0;
+    reg       palette_write = 1'b0;
+    reg [3:0] palette_index = 4'd0;
+    reg [3:0] palette_value = 4'd0;
+
+    reg [4:0] pcjr_array_index = 5'd0;
+    reg       pcjr_array_ff = 1'b0;
+    reg       pcjr_status_toggle = 1'b0;
+    reg [7:0] pcjr_array[0:31];
+    integer   pcjr_i;
+
+    initial begin
+        for (pcjr_i = 0; pcjr_i < 32; pcjr_i = pcjr_i + 1)
+            pcjr_array[pcjr_i] = 8'd0;
+        pcjr_array[0] = 8'h09;
+        pcjr_array[1] = 8'h0F;
+        pcjr_array[2] = 8'h00;
+        pcjr_array[3] = 8'h02;
+    end
+
+    wire pcjr_video = tandy_video;
+    wire tandy_16_mode = tandy_video;
+    wire [8:0] pcjr_mode_sel = {pcjr_array[3][3], (pcjr_array[0] & 8'h13)};
+    wire pcjr_mode_text = (pcjr_mode_sel == 9'h00) || (pcjr_mode_sel == 9'h01);
+    wire pcjr_mode_16 = (pcjr_mode_sel == 9'h13) || (pcjr_mode_sel == 9'h12);
+    wire pcjr_mode_640 = (pcjr_mode_sel == 9'h03) || (pcjr_mode_sel == 9'h102);
+    wire pcjr_color_4 = (pcjr_mode_sel == 9'h03);
+    wire pcjr_grph_mode = ~pcjr_mode_text;
+    wire pcjr_bw_mode = pcjr_array[0][2];
+    wire pcjr_hres_mode = pcjr_array[0][0];
+    wire pcjr_video_enabled = pcjr_array[0][3];
+    wire pcjr_blink_enabled = pcjr_array[3][2];
+    wire [3:0] pcjr_palette_mask = pcjr_array[1][3:0];
+    wire [3:0] pcjr_border_color = pcjr_array[2][3:0];
 
     wire bw_mode;
     wire mode_640;
-    wire tandy_16_mode = tandy_video;
     wire video_enabled;
     wire blink_enabled;
-	 
-    wire tandy_border_en = tandy_modesel[2];
-    wire tandy_color_4 = tandy_modesel[3];
+    wire tandy_color_4;
+    wire [3:0] border_color;
 
     wire hsync_int;
     wire vsync_l;
@@ -106,6 +137,9 @@ module cga(
     wire line_reset;
     wire pixel_addr13;
     wire pixel_addr14;
+    wire pcjr_graphics;
+    wire pcjr_addr_use;
+    wire pcjr_addr_hi;
 
     wire charrom_read;
     wire disp_pipeline;
@@ -125,6 +159,10 @@ module cga(
     reg bus_memr_synced_l;
     reg bus_ior_synced_l;
     reg bus_iow_synced_l;
+    reg prev_bus_ior_synced_l;
+    reg prev_bus_iow_synced_l;
+    wire bus_ior_pulse;
+    wire bus_iow_pulse;
 
     //wire cpu_memsel;
     //reg[1:0] wait_state = 2'd0;
@@ -147,7 +185,12 @@ module cga(
         //bus_memr_synced_l <= bus_memr_l;
         bus_ior_synced_l <= bus_ior_l;
         bus_iow_synced_l <= bus_iow_l;
+        prev_bus_ior_synced_l <= bus_ior_synced_l;
+        prev_bus_iow_synced_l <= bus_iow_synced_l;
     end
+
+    assign bus_ior_pulse = ~bus_ior_synced_l & prev_bus_ior_synced_l;
+    assign bus_iow_pulse = ~bus_iow_synced_l & prev_bus_iow_synced_l;
 
     // Some modules need a non-inverted vsync trigger
     assign vsync = ~vsync_l;
@@ -169,7 +212,7 @@ module cga(
 //        if (bus_mem_cs & ~bus_memr_l) begin
 //            bus_int_out <= bus_out_mem;
         if (status_cs & ~bus_ior_l) begin
-            bus_int_out <= cga_status_reg;
+            bus_int_out <= pcjr_video ? pcjr_status_reg : cga_status_reg;
         end else if (crtc_cs & ~bus_ior_l & (bus_a[0] == 1)) begin
             bus_int_out <= bus_out_crtc;
         end else begin
@@ -228,27 +271,49 @@ module cga(
     // status register (read only at 3BA)
     // FIXME: vsync_l should be delayed/synced to HCLK.
     assign cga_status_reg = {4'b1111, vsync_l, 2'b10, ~display_enable};
+    assign pcjr_status_reg = {3'b000, pcjr_status_toggle, 1'b0, ~vsync_l, 1'b0, display_enable};
 
     // mode control register (write only)
     //
-    assign hres_mode = cga_control_reg[0]; // 1=80x25,0=40x25
-    assign grph_mode = cga_control_reg[1]; // 1=graphics, 0=text
-    assign bw_mode = cga_control_reg[2]; // 1=b&w, 0=color
+    assign hres_mode = pcjr_video ? pcjr_hres_mode : cga_control_reg[0]; // 1=80x25,0=40x25
+    assign grph_mode = pcjr_video ? pcjr_grph_mode : cga_control_reg[1]; // 1=graphics, 0=text
+    assign bw_mode = pcjr_video ? pcjr_bw_mode : cga_control_reg[2]; // 1=b&w, 0=color
 
-    assign video_enabled = NO_DISPLAY_DISABLE ? 1'b1 : cga_control_reg[3];
+    assign video_enabled = pcjr_video ? pcjr_video_enabled :
+        (NO_DISPLAY_DISABLE ? 1'b1 : cga_control_reg[3]);
      
-    assign mode_640 = cga_control_reg[4]; // 1=640x200 mode, 0=others
-    assign blink_enabled = cga_control_reg[5];
+    assign mode_640 = pcjr_video ? pcjr_mode_640 : cga_control_reg[4]; // 1=640x200 mode, 0=others
+    assign blink_enabled = pcjr_video ? pcjr_blink_enabled : cga_control_reg[5];
 	 
-    assign tandy_color_16 = tandy_modesel[4];
+    assign tandy_color_16 = pcjr_video ? pcjr_mode_16 : tandy_modesel[4];
+    assign tandy_color_4 = pcjr_video ? pcjr_color_4 : tandy_modesel[3];
+    assign border_color = pcjr_video ? pcjr_border_color : tandy_bordercol;
 
     assign hsync = hsync_int;
 
     // Update control or color register
     always @ (posedge clk)
     begin
-        tandy_palette_set <= 1'b0;
-        if (~bus_iow_synced_l) begin
+        palette_write <= 1'b0;
+        if (pcjr_video) begin
+            if (status_cs && bus_ior_pulse) begin
+                pcjr_array_ff <= 1'b0;
+                pcjr_status_toggle <= ~pcjr_status_toggle;
+            end
+            if (status_cs && bus_iow_pulse) begin
+                if (!pcjr_array_ff)
+                    pcjr_array_index <= bus_d[4:0];
+                else begin
+                    pcjr_array[pcjr_array_index] <= pcjr_array_index[4] ? {4'b0000, bus_d[3:0]} : bus_d;
+                    if (pcjr_array_index[4]) begin
+                        palette_write <= 1'b1;
+                        palette_index <= pcjr_array_index[3:0];
+                        palette_value <= bus_d[3:0];
+                    end
+                end
+                pcjr_array_ff <= ~pcjr_array_ff;
+            end
+        end else if (~bus_iow_synced_l) begin
             if (control_cs) begin
                 cga_control_reg <= bus_d;
             end else if (colorsel_cs) begin
@@ -256,14 +321,14 @@ module cga(
             end else if (status_cs) begin
                 tandy_color_reg <= bus_d;
             end else if (tandy_newcolorsel_cs && tandy_color_reg[7:4] == 4'b0001) begin // Palette Mask Register
-                tandy_newcolor <= bus_d[3:0];
-                     tandy_palette_set <= 1'b1;
-                end else if (tandy_newcolorsel_cs && tandy_color_reg[3:0] == 4'b0010) begin // Border Color
+                palette_index <= tandy_color_reg[3:0];
+                palette_value <= bus_d[3:0];
+                palette_write <= 1'b1;
+            end else if (tandy_newcolorsel_cs && tandy_color_reg[3:0] == 4'b0010) begin // Border Color
                 tandy_bordercol <= bus_d[3:0];
             end else if (tandy_newcolorsel_cs && tandy_color_reg[3:0] == 4'b0011) begin // Mode Select
                 tandy_modesel <= bus_d[4:0];
             end
-
         end
     end 
 	 
@@ -316,10 +381,15 @@ module cga(
 
     // In graphics mode, memory address MSB comes from CRTC row
     // which produces the weird CGA "interlaced" memory map
-    assign pixel_addr13 = grph_mode ? row_addr[0] : crtc_addr[12];
+    assign pcjr_graphics = pcjr_video & grph_mode;
+    assign pcjr_addr_use = (pcjr_addr_mode != 2'b00);
+    assign pcjr_addr_hi = (pcjr_addr_mode == 2'b11);
+    assign pixel_addr13 = pcjr_graphics ? (pcjr_addr_use ? row_addr[0] : 1'b0) :
+                         (grph_mode ? row_addr[0] : crtc_addr[12]);
 
-    // Address bit 14 is only used for Tandy modes (32K RAM)
-    assign pixel_addr14 = grph_mode ? row_addr[1] : 1'b0;
+    // Address bit 14 is only used for Tandy/PCjr modes (32K RAM)
+    assign pixel_addr14 = pcjr_graphics ? (pcjr_addr_hi ? row_addr[1] : 1'b0) :
+                         (grph_mode ? row_addr[1] : 1'b0);
 
     wire tandy_16_gfx = tandy_16_mode & grph_mode & hres_mode;
 
@@ -366,12 +436,14 @@ module cga(
         .vsync(vsync_l),
         .video_enabled(video_enabled),
         .cga_color_reg(cga_color_reg),
-        .tandy_palette_color(tandy_color_reg[3:0]),
-        .tandy_newcolor(tandy_newcolor),
-        .tandy_palette_set(tandy_palette_set),
-        .tandy_bordercol(tandy_bordercol),
+        .palette_write(palette_write),
+        .palette_index(palette_index),
+        .palette_value(palette_value),
+        .tandy_bordercol(border_color),
         .tandy_color_4(tandy_color_4),
         .tandy_color_16(tandy_color_16),
+        .pcjr_video(pcjr_video),
+        .pcjr_palette_mask(pcjr_palette_mask),
         .video(video)
     );
 

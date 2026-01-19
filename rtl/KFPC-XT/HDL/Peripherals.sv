@@ -228,6 +228,10 @@ module PERIPHERALS #(
     wire    lpt_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h0378 >> 1)); // 0x378 ... 0x379
 	 wire    lpt_ctrl_select         = (iorq && ~address_enable_n && address[15:0] == 16'h037A); // 0x37A
     wire    tandy_page_chip_select  = tandy_video_en && iorq && ~address_enable_n && address[15:0] == 16'h03DF;
+    wire    pcjr_memctrl_32k        = (tandy_page_data[7:6] == 2'b11);
+    wire    [1:0] pcjr_addr_mode    = tandy_page_data[7:6];
+    wire    [2:0] pcjr_b8000_page   = pcjr_memctrl_32k ? {1'b0, tandy_page_data[5:4]} : tandy_page_data[5:3];
+    wire    [2:0] pcjr_vram_page    = pcjr_memctrl_32k ? {1'b0, tandy_page_data[2:1]} : tandy_page_data[2:0];
     wire    xtctl_chip_select       = (iorq && ~address_enable_n && address[15:0] == 16'h8888);
     wire    rtc_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h02C0 >> 1)); // 0x2C0 .. 0x2C1
     wire    floppy0_chip_select_n   = ~(~address_enable_n && ({address[15:3], 3'd0} == 16'h00F0));
@@ -238,7 +242,7 @@ module PERIPHERALS #(
     // Address
     always_comb begin
         if (cga_mem_select && ~memory_write_n && tandy_video_en)
-            latch_address   = {nmi_mask_register_data[3:1], tandy_page_data[3] ? {tandy_page_data[5:3], video_ram_address[13:0]} : {tandy_page_data[5:4], video_ram_address[14:0]}};
+            latch_address   = {nmi_mask_register_data[3:1], pcjr_memctrl_32k ? {pcjr_b8000_page[1:0], video_ram_address[14:0]} : {pcjr_b8000_page, video_ram_address[13:0]}};
         else
             latch_address   = address;
     end
@@ -1108,6 +1112,7 @@ end
         .splashscreen               (splashscreen),
         .thin_font                  (thin_font),
         .tandy_video                (tandy_video_en),
+        .pcjr_addr_mode             (pcjr_addr_mode),
         .grph_mode                  (grph_mode),
         .hres_mode                  (hres_mode),
         .tandy_color_16             (tandy_color_16_raw),
@@ -1138,11 +1143,11 @@ end
     wire [7:0]  cga_copy_data  = splash_copy_active ? splash_rom_data : splash_clear_data;
     wire [16:0] cga_vram_addra = cga_vram_copy ? cga_copy_addr :
                                  (tandy_video_en ? (video_mem_select_1 ? video_ram_address :
-                                 (tandy_page_data[3] ? {tandy_page_data[5:3], video_ram_address[13:0]} :
-                                 {tandy_page_data[5:4], video_ram_address[14:0]})) : {3'b000, video_ram_address[13:0]});
+                                 (pcjr_memctrl_32k ? {pcjr_b8000_page[1:0], video_ram_address[14:0]} :
+                                 {pcjr_b8000_page, video_ram_address[13:0]})) : {3'b000, video_ram_address[13:0]});
     wire [16:0] cga_vram_addrb = tandy_video_en ?
-                                 ((grph_mode & hres_mode) ? {tandy_page_data[2:1], CGA_VRAM_ADDR[14:0]} :
-                                 {tandy_page_data[2:0], CGA_VRAM_ADDR[13:0]}) : {3'b000, CGA_VRAM_ADDR[13:0]};
+                                 (pcjr_memctrl_32k ? {pcjr_vram_page[1:0], CGA_VRAM_ADDR[14:0]} :
+                                 {pcjr_vram_page, CGA_VRAM_ADDR[13:0]}) : {3'b000, CGA_VRAM_ADDR[13:0]};
     wire [7:0]  cga_vram_dina  = cga_vram_copy ? cga_copy_data : video_ram_data;
     wire        cga_vram_ena   = cga_vram_copy ? 1'b1 : (cga_mem_select_1 || video_mem_select_1);
     wire        cga_vram_wea   = cga_vram_copy ? 1'b1 : (~video_memory_write_n & memory_write_n);

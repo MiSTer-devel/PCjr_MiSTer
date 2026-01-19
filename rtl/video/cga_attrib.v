@@ -82,7 +82,7 @@ module cga_attrib(
     assign selblue = bw_mode ? c0 : cga_color_reg[5];
 
 	 assign active_area = tandy_color_4 ? {1'b0, c1, c0, 1'b0} :
-	 (tandy_16_mode | tandy_color_16) ? pix_tandy : {cga_color_reg[4], c1, c0, selblue};
+	 (tandy_color_16) ? pix_tandy : {cga_color_reg[4], c1, c0, selblue};
 	 
 	 assign overscan = (mux_b & mux_a);
     	 
