@@ -78,6 +78,7 @@ always @(posedge clk) clk_rate <= clock_rate;
 reg  [7:0] pcjr_dor;
 reg  [7:0] pcjr_data;
 reg        pcjr_data_ready;
+reg        pcjr_write_stall;
 reg  [9:0] pcjr_watchdog_count;
 reg [27:0] pcjr_watchdog_sum;
 reg        pcjr_watchdog_tick;
@@ -90,6 +91,9 @@ wire pcjr_reset_pulse  = pcjr_dor_write &&  io_writedata[7] && ~pcjr_dor[7];
 wire        pcjr_write_phase;
 wire        pcjr_cmd_phase;
 wire        pcjr_result_phase;
+wire        pcjr_write_ready;
+wire        pcjr_read_exec;
+wire        pcjr_write_exec;
 wire [7:0]  pcjr_stat;
 wire        pcjr_fifo_rd;
 wire        pcjr_fifo_wr;
@@ -142,7 +146,7 @@ wire [7:0] io_readdata_prepare_std =
 wire [7:0] io_readdata_prepare_pcjr =
     (io_address == 3'd2) ? pcjr_dor :
     (io_address == 3'd4) ? pcjr_stat :
-    (io_address == 3'd5) ? (pcjr_result_phase ? reply[7:0] : pcjr_data_ready ? pcjr_data : reply[7:0]) :
+    (io_address == 3'd5) ? (pcjr_result_phase ? reply[7:0] : pcjr_data) :
     (io_address == 3'd7) ? { change[selected_drive[0]], 7'h7F } :
                            8'd0;
 
@@ -243,7 +247,6 @@ always @(posedge clk) begin
 	end else begin
 		if(pcjr_watchdog_arm) begin
 			pcjr_watchdog_count <= 10'd1000;
-			pcjr_irq            <= 1'b0;
 		end else if(pcjr_watchdog_tick && pcjr_watchdog_count != 0) begin
 			pcjr_watchdog_count <= pcjr_watchdog_count - 1'd1;
 			if(pcjr_watchdog_count == 10'd1 && pcjr_dor[5]) pcjr_irq <= 1'b1;
@@ -552,7 +555,7 @@ reg [2:0] reset_sensei;
 always @(posedge clk) begin
 	if(~rst_n)                                                reset_sensei <= 3'd0;
 	else if(sw_reset)                                         reset_sensei <= 3'd4;
-	else if(raise_interrupt)                                  reset_sensei <= 3'd0;
+	else if(!pcjr_mode && raise_interrupt)                    reset_sensei <= 3'd0;
 	else if(cmd_sense_interrupt_status_start && reset_sensei) reset_sensei <= reset_sensei - 3'd1;
 end
 
@@ -565,9 +568,13 @@ wire [1:0] reset_sensei_drive =
 reg pending_interrupt;
 always @(posedge clk) begin
 	if(~rst_n)               pending_interrupt <= 1'b0;
-	else if(raise_interrupt) pending_interrupt <= 1'b1;
-	else if(pcjr_mode && cmd_sense_interrupt_status_start) pending_interrupt <= 1'b0;
-	else if(!pcjr_mode && ~irq)            pending_interrupt <= 1'b0;
+	else if(pcjr_mode) begin
+		if(delay_last_cycle) pending_interrupt <= 1'b1;
+		else if(cmd_sense_interrupt_status_start) pending_interrupt <= 1'b0;
+	end else begin
+		if(raise_interrupt) pending_interrupt <= 1'b1;
+		else if(~irq) pending_interrupt <= 1'b0;
+	end
 end
 
 reg pending_interrupt_last;
@@ -817,9 +824,11 @@ end
 assign pcjr_write_phase  = pcjr_mode && (state == S_WAIT_FOR_FULL_WRITE_FIFO || state == S_WAIT_FOR_FORMAT_INPUT);
 assign pcjr_cmd_phase    = pcjr_mode && (command_left != 0);
 assign pcjr_result_phase = pcjr_mode && (reply_left != 0);
+assign pcjr_read_exec    = pcjr_mode && cmd_read_normal_in_progress;
+assign pcjr_write_exec   = pcjr_mode && (cmd_write_normal_in_progress || cmd_format_in_progress);
 assign pcjr_stat = pcjr_result_phase ? 8'hD0 :
-                   pcjr_data_ready   ? 8'hF0 :
-                   pcjr_write_phase  ? 8'hB0 :
+                   pcjr_read_exec    ? (pcjr_data_ready ? 8'hF0 : 8'h70) :
+                   pcjr_write_exec   ? (pcjr_write_ready ? 8'hB0 : 8'h30) :
                    pcjr_cmd_phase    ? 8'h90 : 8'h80;
 
 reg [15:0] command_wait_counter;
@@ -947,6 +956,7 @@ wire fifo_to_pc   = (state == S_WAIT_FOR_EMPTY_READ_FIFO);
 assign pcjr_fifo_wr = pcjr_mode && io_write && io_address == 3'd5;
 assign pcjr_fifo_rd = pcjr_mode && state == S_WAIT_FOR_EMPTY_READ_FIFO && ~fifo_empty && ~pcjr_data_ready;
 assign pcjr_format_write = pcjr_mode && io_write && io_address == 3'd5 && state == S_WAIT_FOR_FORMAT_INPUT;
+assign pcjr_write_ready = pcjr_write_phase && ~pcjr_write_stall && ~fifo_full;
 
 wire fifo_pc_wr   = ((ndma_write || (~execute_ndma && dma_ack) || (~execute_ndma && dma_has_terminated) || pcjr_fifo_wr) && ~fifo_full);
 wire fifo_pc_rd   = (ndma_read || (~execute_ndma && dma_ack) || pcjr_fifo_rd);
@@ -975,11 +985,25 @@ fifo_to_floppy_inst (
 
 always @(posedge clk) begin
 	if(~rst_n | sw_reset) begin
+		pcjr_write_stall <= 1'b0;
+	end else if(!pcjr_mode || !pcjr_write_phase) begin
+		pcjr_write_stall <= 1'b0;
+	end else if(pcjr_fifo_wr) begin
+		pcjr_write_stall <= 1'b1;
+	end else begin
+		pcjr_write_stall <= 1'b0;
+	end
+end
+
+always @(posedge clk) begin
+	if(~rst_n | sw_reset) begin
 		pcjr_data_ready <= 1'b0;
 		pcjr_data       <= 8'd0;
 	end else if(pcjr_mode) begin
 		if(pcjr_result_phase) begin
 			pcjr_data_ready <= 1'b0;
+		end else if(pcjr_write_phase && pcjr_fifo_wr) begin
+			pcjr_data <= io_writedata;
 		end else if(pcjr_fifo_rd) begin
 			pcjr_data       <= fifo_q;
 			pcjr_data_ready <= 1'b1;
