@@ -221,7 +221,6 @@ module PERIPHERALS #(
     logic   pcjr_nmi_enable;
     logic   ir_test_enable;
 
-    wire    video_mem_select        = tandy_video_en && ~iorq && ~address_enable_n & (address[19:17] == nmi_mask_register_data[3:1]); // 128KB
     wire    cga_mem_select          = ~iorq && ~address_enable_n && enable_cga & (address[19:15] == 5'b10111); // B8000 - BFFFF (16 KB / 32 KB)
     wire    uart_chip_select        = (~address_enable_n && {address[15:3], 3'd0} == 16'h03F8);
     wire    uart2_chip_select       = (~address_enable_n && {address[15:3], 3'd0} == 16'h02F8);
@@ -232,6 +231,13 @@ module PERIPHERALS #(
     wire    [1:0] pcjr_addr_mode    = tandy_page_data[7:6];
     wire    [2:0] pcjr_b8000_page   = pcjr_memctrl_32k ? {1'b0, tandy_page_data[5:4]} : tandy_page_data[5:3];
     wire    [2:0] pcjr_vram_page    = pcjr_memctrl_32k ? {1'b0, tandy_page_data[2:1]} : tandy_page_data[2:0];
+    wire    [2:0] pcjr_phys_page    = pcjr_memctrl_32k ? {1'b0, address[16:15]} : address[16:14];
+    wire    video_mem_select        = tandy_video_en && ~iorq && ~address_enable_n &&
+                                      (address[19:17] == 3'b000) &&
+                                      (pcjr_memctrl_32k ? ((pcjr_phys_page[1:0] == pcjr_vram_page[1:0]) ||
+                                                           (pcjr_phys_page[1:0] == pcjr_b8000_page[1:0])) :
+                                                          ((pcjr_phys_page == pcjr_vram_page) ||
+                                                           (pcjr_phys_page == pcjr_b8000_page)));
     wire    xtctl_chip_select       = (iorq && ~address_enable_n && address[15:0] == 16'h8888);
     wire    rtc_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h02C0 >> 1)); // 0x2C0 .. 0x2C1
     wire    floppy0_chip_select_n   = ~(~address_enable_n && ({address[15:3], 3'd0} == 16'h00F0));
@@ -241,10 +247,7 @@ module PERIPHERALS #(
     //
     // Address
     always_comb begin
-        if (cga_mem_select && ~memory_write_n && tandy_video_en)
-            latch_address   = {nmi_mask_register_data[3:1], pcjr_memctrl_32k ? {pcjr_b8000_page[1:0], video_ram_address[14:0]} : {pcjr_b8000_page, video_ram_address[13:0]}};
-        else
-            latch_address   = address;
+        latch_address = address;
     end
 
 
@@ -1403,7 +1406,7 @@ end
             data_bus_out_from_chipset <= 1'b1;
             data_bus_out <= ppi_data_bus_out;
         end
-        else if (cga_mem_select && (~memory_read_n))
+        else if ((cga_mem_select || video_mem_select) && (~memory_read_n))
         begin
             data_bus_out_from_chipset <= 1'b1;
             data_bus_out <= cga_vram_cpu_dout;

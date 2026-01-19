@@ -271,7 +271,7 @@ module cga(
     // status register (read only at 3BA)
     // FIXME: vsync_l should be delayed/synced to HCLK.
     assign cga_status_reg = {4'b1111, vsync_l, 2'b10, ~display_enable};
-    assign pcjr_status_reg = {3'b000, pcjr_status_toggle, 1'b0, ~vsync_l, 1'b0, display_enable};
+    assign pcjr_status_reg = {3'b000, pcjr_status_toggle, vsync_l, 2'b00, display_enable};
 
     // mode control register (write only)
     //
