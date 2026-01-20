@@ -60,6 +60,7 @@ module cga(
 
     parameter USE_BUS_WAIT = 0; // Should we add wait states on the ISA bus?
     parameter NO_DISPLAY_DISABLE = 0; // If 1, prevents flicker artifacts in DOS
+    localparam STD_HSYNCWIDTH = 4'd10;
 
     parameter IO_BASE_ADDR = 16'h3d0; // MDA is 3B0, CGA is 3D0
     // parameter FRAMEBUFFER_ADDR = 20'hB8000; // MDA is B0000, CGA is B8000
@@ -127,6 +128,7 @@ module cga(
     wire vsync_l;
     wire cursor;
     wire display_enable;
+    wire [3:0] hsync_width_crtc;
 
     // Two different clocks from the sequencer
     wire hclk;
@@ -288,6 +290,8 @@ module cga(
     assign tandy_color_16 = pcjr_video ? pcjr_mode_16 : tandy_modesel[4];
     assign tandy_color_4 = pcjr_video ? pcjr_color_4 : tandy_modesel[3];
     assign border_color = pcjr_video ? pcjr_border_color : tandy_bordercol;
+    assign std_hsyncwidth = (hsync_width_crtc == STD_HSYNCWIDTH);
+    assign vblank_border = vblank;
 
     assign hsync = hsync_int;
 
@@ -359,6 +363,7 @@ module cga(
 		  
 		  .MA(crtc_addr),
 		  .RA(row_addr),
+		  .hsync_width(hsync_width_crtc),
 		  
 		  .crt_h_offset(crt_h_offset),
 		  .crt_v_offset(crt_v_offset),
