@@ -210,7 +210,7 @@ module emu
 
     localparam CONF_STR_SYSTEM = "PCjr;UART115200:115200;";
     localparam CONF_STR_ROM = "P1FC1,ROM,PCjr BIOS:;P1-;";
-    localparam CONF_STR_TANDY_AUDIO = "P2o23,Tandy Volume,1,2,3,4;";
+    localparam CONF_STR_TANDY_AUDIO = "P2o23,PCjr Volume,1,2,3,4;";
 
     localparam CONF_STR = {
 		CONF_STR_SYSTEM,
