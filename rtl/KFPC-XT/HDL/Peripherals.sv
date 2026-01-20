@@ -30,9 +30,6 @@ module PERIPHERALS #(
         input   logic           video_output,
         input   logic           clk_vga_cga,
         input   logic           enable_cga,
-        input   logic           clk_vga_hgc,
-        input   logic           enable_hgc,
-        input   logic   [1:0]   hgc_rgb,
         output  logic           de_o,
         output  logic   [5:0]   VGA_R,
         output  logic   [5:0]   VGA_G,
@@ -623,7 +620,7 @@ module PERIPHERALS #(
             ps2_clock_out = ~(keybord_irq | ~ps2_send_clock | ~ps2_reset_n);
     end
 
-    always_ff @(posedge clk_vga_hgc)
+    always_ff @(posedge clk_vga_cga)
     begin
         swap_video_buffer_2 <= swap_video_buffer_1;
         swap_video          <= swap_video_buffer_2;

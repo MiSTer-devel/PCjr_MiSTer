@@ -1015,8 +1015,6 @@ module emu
     wire tandy_bios_flag = bios_write_n ? 1'b1 : tandy_bios_write;
 
     wire video_output_sel = 1'b0;
-    wire enable_hgc_sel = 1'b0;
-    wire [1:0] hgc_rgb_sel = 2'b00;
     wire hercules_hw_sel = hercules_hw;
     wire ems_enabled_sel = 1'b0;
     wire [1:0] ems_address_sel = 2'b00;
@@ -1055,9 +1053,6 @@ module emu
 		.video_output                       (video_output_sel),
 		.clk_vga_cga                        (clk_28_636),
 		.enable_cga                         (1'b1),
-		.clk_vga_hgc                        (clk_56_875),
-		.enable_hgc                         (enable_hgc_sel),
-		.hgc_rgb                            (hgc_rgb_sel),
 	//	.de_o                               (VGA_DE),
 		.VGA_R                              (r),
 		.VGA_G                              (g),
