@@ -1398,8 +1398,11 @@ module emu
 	 wire HBlank_VGA;
 
     reg [10:0] HBlank_counter = 0;
+    reg [10:0] HBlank_counter_hgc = 0;
     reg HBlank_fixed = 1'b1;
+    reg HBlank_fixed_hgc = 1'b1;
     reg [1:0] HSync_del = 1'b11;
+    reg [1:0] HSync_del_hgc = 1'b11;
     reg        video_pause_core_buf;
     reg        video_pause_core;
 
