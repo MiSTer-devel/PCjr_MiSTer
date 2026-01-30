@@ -215,8 +215,7 @@ module emu
     localparam CONF_STR = {
 		CONF_STR_SYSTEM,
 		"S0,IMGIMAVFD,Floppy A:;",
-		"S1,IMGIMAVFD,Floppy B:;",
-		"OJK,Write Protect,None,A:,B:,A: & B:;",
+		"OJ,Write Protect,No,Yes;",
 		"-;",
 		"P1,System & BIOS;",
 		"P1-;",
