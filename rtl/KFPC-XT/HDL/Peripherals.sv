@@ -230,7 +230,7 @@ module PERIPHERALS #(
     wire    tandy_page_chip_select  = tandy_video_en && iorq && ~address_enable_n && address[15:0] == 16'h03DF;
     wire    xtctl_chip_select       = (iorq && ~address_enable_n && address[15:0] == 16'h8888);
     wire    rtc_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h02C0 >> 1)); // 0x2C0 .. 0x2C1
-    wire    floppy0_chip_select_n   = ~(~address_enable_n && (({address[15:2], 2'd0} == 16'h03F0) || ({address[15:1], 1'd0} == 16'h03F4) || ({address[15:0]} == 16'h03F7)));
+    wire    floppy0_chip_select_n   = ~(~address_enable_n && ({address[15:3], 3'd0} == 16'h00F0));
 
     //
     // I/O Ports
@@ -1231,6 +1231,7 @@ end
     (
         .clk                        (clock),
         .rst_n                      (~reset),
+        .pcjr_mode                  (1'b1),
 
         //dma
         .dma_req                    (fdd_dma_req_wire),

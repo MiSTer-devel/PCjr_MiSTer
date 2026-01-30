@@ -29,6 +29,7 @@ module floppy
 (
 	input             clk,
 	input             rst_n,
+	input             pcjr_mode,
 
 	//dma
 	output            dma_req,
@@ -74,6 +75,26 @@ module floppy
 reg [27:0] clk_rate;
 always @(posedge clk) clk_rate <= clock_rate;
 
+reg  [7:0] pcjr_dor;
+reg  [7:0] pcjr_data;
+reg        pcjr_data_ready;
+reg  [9:0] pcjr_watchdog_count;
+reg [27:0] pcjr_watchdog_sum;
+reg        pcjr_watchdog_tick;
+reg        pcjr_irq;
+
+wire pcjr_dor_write    = pcjr_mode && io_write && io_address == 3'h2;
+wire pcjr_watchdog_arm = pcjr_dor_write &&  pcjr_dor[6] && ~io_writedata[6];
+wire pcjr_reset_pulse  = pcjr_dor_write &&  io_writedata[7] && ~pcjr_dor[7];
+
+wire        pcjr_write_phase;
+wire        pcjr_cmd_phase;
+wire        pcjr_result_phase;
+wire [7:0]  pcjr_stat;
+wire        pcjr_fifo_rd;
+wire        pcjr_fifo_wr;
+wire        pcjr_format_write;
+
 //------------------------------------------------------------------------------ media management
 
 assign mgmt_readdata = (!mgmt_address) ? {selected_drive[0], sd_sector[14:0]} : (&mgmt_address) ? fifo_readdata : 16'd1;
@@ -107,10 +128,10 @@ wire fifo_write = mgmt_write && &mgmt_address;
 
 //------------------------------------------------------------------------------ io read
 
-wire ndma_read  = io_read  && io_address == 3'd5 && execute_ndma && cmd_read_normal_in_progress;
-wire ndma_write = io_write && io_address == 3'd5 && execute_ndma && (cmd_write_normal_in_progress || cmd_format_in_progress);
+wire ndma_read  = !pcjr_mode && io_read  && io_address == 3'd5 && execute_ndma && cmd_read_normal_in_progress;
+wire ndma_write = !pcjr_mode && io_write && io_address == 3'd5 && execute_ndma && (cmd_write_normal_in_progress || cmd_format_in_progress);
 
-wire [7:0] io_readdata_prepare =
+wire [7:0] io_readdata_prepare_std =
     (io_address == 3'd2) ? { 2'b0, motor_enable[1], motor_enable[0], dma_irq_enable, enable, selected_drive } : //digital output register
     (io_address == 3'd4) ? { datareg_ready, transfer_to_cpu, execute_ndma, busy, in_seek_mode } :  //main status reg
     (ndma_read)          ? fifo_q :
@@ -118,18 +139,28 @@ wire [7:0] io_readdata_prepare =
     (io_address == 3'd7) ? { change[selected_drive[0]], 7'h7F } :
                            8'd0;
 
+wire [7:0] io_readdata_prepare_pcjr =
+    (io_address == 3'd2) ? pcjr_dor :
+    (io_address == 3'd4) ? pcjr_stat :
+    (io_address == 3'd5) ? (pcjr_result_phase ? reply[7:0] : pcjr_data_ready ? pcjr_data : reply[7:0]) :
+    (io_address == 3'd7) ? { change[selected_drive[0]], 7'h7F } :
+                           8'd0;
+
+wire [7:0] io_readdata_prepare = pcjr_mode ? io_readdata_prepare_pcjr : io_readdata_prepare_std;
+
 always @(posedge clk) io_readdata <= io_readdata_prepare;
 
 //------------------------------------------------------------------------------
 
-wire sw_reset = 
+wire sw_reset = pcjr_mode ?
+	pcjr_reset_pulse :
 	(io_write && io_address == 3'h2 && io_writedata[2] == 1'b0 && enable) ||
 	(io_write && io_address == 3'h4 && io_writedata[7]);
 
 reg selected_drive_r;
 always @(posedge clk) selected_drive_r <= selected_drive[0];
 
-wire [1:0] selected_drive = {1'b0, rst_n &
+wire [1:0] selected_drive_raw = {1'b0, rst_n &
 (
 	(io_write && io_address == 3'h2) ? io_writedata[0]  :
 	(cmd_recalibrate_start)          ? io_writedata[0]  :
@@ -140,16 +171,24 @@ wire [1:0] selected_drive = {1'b0, rst_n &
 	                                   selected_drive_r
 )};
 
+wire [1:0] selected_drive = pcjr_mode ? 2'd0 : selected_drive_raw;
+
 reg motor_enable[2];
 reg old_motor_enable[2];
 always @(posedge clk) begin
 	if(~rst_n)                              motor_enable[0] <= 1'b0;
+	else if(pcjr_mode) begin
+		if(pcjr_dor_write) motor_enable[0] <= io_writedata[0];
+	end
 	else if(io_write && io_address == 3'h2) motor_enable[0] <= io_writedata[4];
 	                                        old_motor_enable[0] <= motor_enable[0];
 end
 
 always @(posedge clk) begin
 	if(~rst_n)                              motor_enable[1] <= 1'b0;
+	else if(pcjr_mode) begin
+		if(pcjr_dor_write) motor_enable[1] <= 1'b0;
+	end
 	else if(io_write && io_address == 3'h2) motor_enable[1] <= io_writedata[5];
 	                                        old_motor_enable[1] <= motor_enable[1];
 end
@@ -157,12 +196,14 @@ end
 reg dma_irq_enable;
 always @(posedge clk) begin
 	if(~rst_n)                              dma_irq_enable <= 1'b1;
+	else if(pcjr_mode)                      dma_irq_enable <= 1'b0;
 	else if(io_write && io_address == 3'h2) dma_irq_enable <= io_writedata[3];
 end
 
 reg enable;
 always @(posedge clk) begin
 	if(~rst_n)                              enable <= 1'b1;
+	else if(pcjr_mode)                      enable <= 1'b1;
 	else if(io_write && io_address == 3'h2) enable <= io_writedata[2];
 end
 
@@ -171,6 +212,45 @@ always @(posedge clk) begin
 	if(~rst_n)                              data_rate <= 2'b10;
 	else if(io_write && io_address == 3'h4) data_rate <= io_writedata[1:0];
 	else if(io_write && io_address == 3'h7) data_rate <= io_writedata[1:0];
+end
+
+always @(posedge clk) begin
+	if(~rst_n)               pcjr_dor <= 8'd0;
+	else if(pcjr_dor_write)  pcjr_dor <= io_writedata;
+end
+
+always @(posedge clk) begin
+	pcjr_watchdog_tick <= 1'b0;
+	if(~rst_n || sw_reset) begin
+		pcjr_watchdog_sum <= 28'd0;
+	end else if(pcjr_watchdog_arm) begin
+		pcjr_watchdog_sum <= 28'd0;
+	end else if(pcjr_mode && pcjr_watchdog_count != 0) begin
+		pcjr_watchdog_sum <= pcjr_watchdog_sum + 28'd1000;
+		if(pcjr_watchdog_sum >= clk_rate) begin
+			pcjr_watchdog_sum <= pcjr_watchdog_sum - clk_rate;
+			pcjr_watchdog_tick <= 1'b1;
+		end
+	end else begin
+		pcjr_watchdog_sum <= 28'd0;
+	end
+end
+
+always @(posedge clk) begin
+	if(~rst_n || sw_reset) begin
+		pcjr_watchdog_count <= 10'd0;
+		pcjr_irq            <= 1'b0;
+	end else begin
+		if(pcjr_watchdog_arm) begin
+			pcjr_watchdog_count <= 10'd1000;
+			pcjr_irq            <= 1'b0;
+		end else if(pcjr_watchdog_tick && pcjr_watchdog_count != 0) begin
+			pcjr_watchdog_count <= pcjr_watchdog_count - 1'd1;
+			if(pcjr_watchdog_count == 10'd1 && pcjr_dor[5]) pcjr_irq <= 1'b1;
+		end
+
+		if(pcjr_reset_pulse) pcjr_irq <= 1'b0;
+	end
 end
 
 reg datareg_ready;
@@ -196,8 +276,9 @@ end
 reg execute_ndma;
 always @(posedge clk) begin
 	if(~rst_n)                                  execute_ndma <= 1'b0;
-	else if(cmd_read_write_ok_at_start && ndma) execute_ndma <= 1'b1;
-	else if(cmd_format_ok_at_start && ndma)     execute_ndma <= 1'b1;
+	else if(pcjr_mode && (cmd_read_write_ok_at_start || cmd_format_ok_at_start)) execute_ndma <= 1'b1;
+	else if(!pcjr_mode && cmd_read_write_ok_at_start && ndma)                    execute_ndma <= 1'b1;
+	else if(!pcjr_mode && cmd_format_ok_at_start && ndma)                        execute_ndma <= 1'b1;
 	else if(enter_result_phase)                 execute_ndma <= 1'b0;
 end
 
@@ -458,6 +539,7 @@ always @(posedge clk) begin
 	old_enable <= enable;
 
 	if(~rst_n | sw_reset)                                irq <= 1'b0;
+	else if(pcjr_mode)                                   irq <= pcjr_irq;
 	else if(~old_enable & enable)                        irq <= 1'b1;
 	else if(ndma_write | ndma_read)                      irq <= 1'b0;
 	else if(ndma_irq | raise_interrupt)                  irq <= 1'b1;
@@ -579,6 +661,7 @@ reg [31:0] format_data;
 always @(posedge clk) begin
 	if(~rst_n)                                      format_data <= 32'd0;
 	else if(ndma_write && format_data_count < 3'd4) format_data <= { format_data[23:0], io_writedata };
+	else if(pcjr_format_write && format_data_count < 3'd4) format_data <= { format_data[23:0], io_writedata };
 	else if(dma_ack && format_data_count < 3'd4)    format_data <= { format_data[23:0], dma_readdata };
 end
 
@@ -586,7 +669,7 @@ reg [2:0] format_data_count;
 always @(posedge clk) begin
 	if(~rst_n)                                                   format_data_count <= 3'd0;
 	else if(state != S_WAIT_FOR_FORMAT_INPUT)                    format_data_count <= 3'd0;
-	else if((ndma_write || dma_ack) && format_data_count < 3'd4) format_data_count <= format_data_count + 3'd1;
+	else if((ndma_write || dma_ack || pcjr_format_write) && format_data_count < 3'd4) format_data_count <= format_data_count + 3'd1;
 end
 
 reg [7:0] format_filler_byte;
@@ -728,6 +811,14 @@ always @(posedge clk) begin
 	else if(state == S_CHECK_TC)                                                  state <= S_PREPARE_COUNT;
 end
 
+assign pcjr_write_phase  = pcjr_mode && (state == S_WAIT_FOR_FULL_WRITE_FIFO || state == S_WAIT_FOR_FORMAT_INPUT);
+assign pcjr_cmd_phase    = pcjr_mode && (command_left != 0);
+assign pcjr_result_phase = pcjr_mode && (reply_left != 0);
+assign pcjr_stat = pcjr_result_phase ? 8'hD0 :
+                   pcjr_data_ready   ? 8'hF0 :
+                   pcjr_write_phase  ? 8'hB0 :
+                   pcjr_cmd_phase    ? 8'h90 : 8'h80;
+
 reg [15:0] command_wait_counter;
 always @(posedge clk) begin
 	if(~rst_n)                                       command_wait_counter <= 0;
@@ -821,7 +912,7 @@ end
 
 assign dma_writedata = fifo_q;
 
-assign dma_req = ~execute_ndma   && ~dma_has_terminated && dma_irq_enable && ~dma_ack && (
+assign dma_req = !pcjr_mode && ~execute_ndma   && ~dma_has_terminated && dma_irq_enable && ~dma_ack && (
 	(cmd_read_normal_in_progress  && ~fifo_empty && state == S_WAIT_FOR_EMPTY_READ_FIFO) ||
 	(cmd_write_normal_in_progress && ~fifo_full && state == S_WAIT_FOR_FULL_WRITE_FIFO) ||
 	(cmd_format_in_progress       && format_data_count < 3'd4 && state == S_WAIT_FOR_FORMAT_INPUT)
@@ -850,8 +941,12 @@ end
 
 wire fifo_from_pc = (state == S_WAIT_FOR_FULL_WRITE_FIFO);
 wire fifo_to_pc   = (state == S_WAIT_FOR_EMPTY_READ_FIFO);
-wire fifo_pc_wr   = ((ndma_write || (~execute_ndma && dma_ack) || (~execute_ndma && dma_has_terminated)) && ~fifo_full);
-wire fifo_pc_rd   = (ndma_read || (~execute_ndma && dma_ack));
+assign pcjr_fifo_wr = pcjr_mode && io_write && io_address == 3'd5;
+assign pcjr_fifo_rd = pcjr_mode && state == S_WAIT_FOR_EMPTY_READ_FIFO && ~fifo_empty && ~pcjr_data_ready;
+assign pcjr_format_write = pcjr_mode && io_write && io_address == 3'd5 && state == S_WAIT_FOR_FORMAT_INPUT;
+
+wire fifo_pc_wr   = ((ndma_write || (~execute_ndma && dma_ack) || (~execute_ndma && dma_has_terminated) || pcjr_fifo_wr) && ~fifo_full);
+wire fifo_pc_rd   = (ndma_read || (~execute_ndma && dma_ack) || pcjr_fifo_rd);
 
 simple_fifo #(
 	.width      (8),
@@ -874,5 +969,23 @@ fifo_to_floppy_inst (
 );
 
 //------------------------------------------------------------------------------
+
+always @(posedge clk) begin
+	if(~rst_n | sw_reset) begin
+		pcjr_data_ready <= 1'b0;
+		pcjr_data       <= 8'd0;
+	end else if(pcjr_mode) begin
+		if(pcjr_result_phase) begin
+			pcjr_data_ready <= 1'b0;
+		end else if(pcjr_fifo_rd) begin
+			pcjr_data       <= fifo_q;
+			pcjr_data_ready <= 1'b1;
+		end else if(io_read && io_address == 3'd5 && pcjr_data_ready) begin
+			pcjr_data_ready <= 1'b0;
+		end
+	end else begin
+		pcjr_data_ready <= 1'b0;
+	end
+end
 
 endmodule
