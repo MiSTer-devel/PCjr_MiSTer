@@ -372,6 +372,16 @@ module PERIPHERALS #(
     logic   [7:0]   port_a_in;
     logic           prev_keybord_irq;
     logic           keybd_latch;
+    wire            pcjr_keybd_in = 1'b1; // IR keyboard idle-high placeholder
+    wire            pcjr_cable_connected_n = 1'b0;
+    wire    [7:0]   pcjr_port_c_in = {
+        pcjr_cable_connected_n,
+        pcjr_keybd_in,
+        timer_counter_out[2],
+        timer_counter_out[2],
+        port_c_in[3:0]
+    };
+    wire    [7:0]   port_c_in_mux = pcjr_mode ? pcjr_port_c_in : port_c_in;
 
     KF8255 u_KF8255 
     (
@@ -392,7 +402,7 @@ module PERIPHERALS #(
         .port_b_in                  (pcjr_mode ? 8'hFF : port_b_in),
         .port_b_out                 (port_b_out),
         .port_b_io                  (port_b_io),
-        .port_c_in                  (port_c_in),
+        .port_c_in                  (port_c_in_mux),
         .port_c_out                 (port_c_out),
         .port_c_io                  (port_c_io)
     );
