@@ -497,7 +497,7 @@ reg cmd_read_write_was_ndma_terminal;
 always @(posedge clk) begin
     if(~rst_n)                                                                                 cmd_read_write_was_ndma_terminal <= 1'd0;
     else if(state == S_UPDATE_SECTOR && sector[selected_drive[0]] == eot[selected_drive[0]] && 
-	        {1'b0, head[selected_drive[0]] } == (media_heads[selected_drive[0]] - 2'd1))        cmd_read_write_was_ndma_terminal <= 1'd1;
+	        (!cmd_read_write_multitrack || ({1'b0, head[selected_drive[0]] } == (media_heads[selected_drive[0]] - 2'd1)))) cmd_read_write_was_ndma_terminal <= 1'd1;
     else if(state == S_UPDATE_SECTOR)                                                          cmd_read_write_was_ndma_terminal <= 1'd0;
 end
 
