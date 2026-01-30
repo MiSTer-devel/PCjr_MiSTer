@@ -219,8 +219,13 @@ module PERIPHERALS #(
     logic   ir_test_enable;
 
     wire    cga_mem_select          = ~iorq && ~address_enable_n && enable_cga & (address[19:15] == 5'b10111); // B8000 - BFFFF (16 KB / 32 KB)
-    wire    uart_chip_select        = (~address_enable_n && {address[15:3], 3'd0} == 16'h03F8);
-    wire    uart2_chip_select       = (~address_enable_n && {address[15:3], 3'd0} == 16'h02F8);
+    // FIX: uart_chip_select must NOT include iorq because iorq_uart detects the rising edge
+    // of io_write_n (when io_write_n=1), but iorq requires io_write_n=0. They can never be true simultaneously.
+    // The address is stable during the entire bus cycle, so we only need to check the address.
+    // PCjr uses 0x2F8 for internal COM port (unlike standard PC which uses 0x3F8)
+    wire    uart_chip_select        = ({address[15:3], 3'd0} == 16'h02F8);  // PCjr internal COM at 0x2F8
+    // uart2 is for external serial (directly exposed to user I/O pins)
+    wire    uart2_chip_select       = ({address[15:3], 3'd0} == 16'h03F8);  // External at 0x3F8
     wire    lpt_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h0378 >> 1)); // 0x378 ... 0x379
 	 wire    lpt_ctrl_select         = (iorq && ~address_enable_n && address[15:0] == 16'h037A); // 0x37A
     wire    tandy_page_chip_select  = tandy_video_en && iorq && ~address_enable_n && address[15:0] == 16'h03DF;
@@ -283,8 +288,8 @@ module PERIPHERALS #(
         .interrupt_request          ({interrupt_request[7],
                                         fdd_interrupt,
                                         interrupt_request[5],
-                                        uart_interrupt,
-                                        uart2_interrupt,
+                                        uart2_interrupt,   // IRQ4 - external UART at 0x3F8
+                                        uart_interrupt,    // IRQ3 - internal PCjr UART at 0x2F8
                                         interrupt_request[2],
                                         keybord_interrupt,
                                         timer_interrupt})
