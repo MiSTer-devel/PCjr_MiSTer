@@ -287,7 +287,7 @@ module PERIPHERALS #(
         .interrupt_to_cpu           (interrupt_to_cpu_buf),
         .interrupt_request          ({interrupt_request[7],
                                         fdd_interrupt,
-                                        interrupt_request[5],
+                                        (interrupt_request[5] | video_irq),
                                         uart2_interrupt,   // IRQ4 - external UART at 0x3F8
                                         uart_interrupt,    // IRQ3 - internal PCjr UART at 0x2F8
                                         interrupt_request[2],
@@ -1027,6 +1027,9 @@ end
     reg   [5:0]   B_CGA;
     reg           HSYNC_CGA;
     reg           VSYNC_CGA;
+    logic         vsync_sync_1;
+    logic         vsync_sync_2;
+    logic         video_irq;
     reg           HBLANK_CGA;
     reg           VBLANK_CGA;
     reg           de_o_cga;
@@ -1037,6 +1040,18 @@ end
     assign VGA_B = B_CGA;
     assign VGA_HSYNC = HSYNC_CGA;
     assign VGA_VSYNC = VSYNC_CGA;
+    // PCjr generates IRQ5 on vertical retrace (active-low VSYNC_CGA).
+    always_ff @(posedge clock, posedge reset) begin
+        if (reset) begin
+            vsync_sync_1 <= 1'b0;
+            vsync_sync_2 <= 1'b0;
+        end else begin
+            vsync_sync_1 <= VSYNC_CGA;
+            vsync_sync_2 <= vsync_sync_1;
+        end
+    end
+
+    assign video_irq = vsync_sync_2 & ~vsync_sync_1;
     assign VGA_HBlank = HBLANK_CGA;
     assign VGA_VBlank = VBLANK_CGA;
     assign de_o = de_o_cga;
