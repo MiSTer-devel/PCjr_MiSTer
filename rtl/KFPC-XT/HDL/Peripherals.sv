@@ -1040,7 +1040,7 @@ end
     assign VGA_B = B_CGA;
     assign VGA_HSYNC = HSYNC_CGA;
     assign VGA_VSYNC = VSYNC_CGA;
-    // PCjr generates IRQ5 on vertical retrace (active-low VSYNC_CGA).
+    // PCjr generates IRQ5 while vertical retrace is active (level).
     always_ff @(posedge clock, posedge reset) begin
         if (reset) begin
             vsync_sync_1 <= 1'b0;
@@ -1051,7 +1051,7 @@ end
         end
     end
 
-    assign video_irq = vsync_sync_2 & ~vsync_sync_1;
+    assign video_irq = vsync_sync_2;
     assign VGA_HBlank = HBLANK_CGA;
     assign VGA_VBlank = VBLANK_CGA;
     assign de_o = de_o_cga;
