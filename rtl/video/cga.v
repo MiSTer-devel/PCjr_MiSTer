@@ -108,10 +108,13 @@ module cga(
     wire pcjr_mode_text = (pcjr_mode_sel == 9'h00) || (pcjr_mode_sel == 9'h01);
     wire pcjr_mode_16 = (pcjr_mode_sel == 9'h13) || (pcjr_mode_sel == 9'h12);
     wire pcjr_mode_640 = (pcjr_mode_sel == 9'h03) || (pcjr_mode_sel == 9'h102);
+    // 4-color PCjr planar mode uses mode 0x03 (640x200x4).
+    // 320x200x4 (0x02) follows CGA-style packing and should not use this path.
     wire pcjr_color_4 = (pcjr_mode_sel == 9'h03);
     wire pcjr_grph_mode = ~pcjr_mode_text;
     wire pcjr_bw_mode = pcjr_array[0][2];
-    wire pcjr_hres_mode = pcjr_array[0][0];
+    // PCjr high-res flag: array[0][0] for most modes, but 640x200x2 (0x102) must force high-res.
+    wire pcjr_hres_mode = (pcjr_mode_sel == 9'h102) ? 1'b1 : pcjr_array[0][0];
     wire pcjr_video_enabled = pcjr_array[0][3];
     wire pcjr_blink_enabled = pcjr_array[3][2];
     wire [3:0] pcjr_palette_mask = pcjr_array[1][3:0];
@@ -389,7 +392,9 @@ module cga(
     assign pcjr_graphics = pcjr_video & grph_mode;
     assign pcjr_addr_use = (pcjr_addr_mode != 2'b00);
     assign pcjr_addr_hi = (pcjr_addr_mode == 2'b11);
-    assign pixel_addr13 = pcjr_graphics ? (pcjr_addr_use ? row_addr[0] : 1'b0) :
+    // In PCjr graphics modes, bit 13 follows RA0 even when addr_mode=0
+    // (CGA-compatible odd/even line interleave).
+    assign pixel_addr13 = pcjr_graphics ? row_addr[0] :
                          (grph_mode ? row_addr[0] : crtc_addr[12]);
 
     // Address bit 14 is only used for Tandy/PCjr modes (32K RAM)

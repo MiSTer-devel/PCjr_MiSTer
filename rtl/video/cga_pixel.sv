@@ -72,7 +72,9 @@ module cga_pixel(
         tandy_color_16 ? video_out :
         (mode_640 && !tandy_color_4) ? {3'b000, pix_640} :
         {2'b00, video_out[2:1]};
-    wire [3:0] pcjr_masked_index = pcjr_pixel_index & pcjr_palette_mask;
+    // PCjr palette mask applies to text and 16-color modes; 4-color/2-color use direct indices.
+    wire pcjr_apply_mask = ~grph_mode || tandy_color_16;
+    wire [3:0] pcjr_masked_index = pcjr_apply_mask ? (pcjr_pixel_index & pcjr_palette_mask) : pcjr_pixel_index;
 
     always_comb
     begin
