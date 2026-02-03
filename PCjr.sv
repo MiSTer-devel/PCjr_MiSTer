@@ -415,6 +415,10 @@ module emu
     wire reset_wire = RESET | status[0] | buttons[1] | !pll_locked | splashscreen | splash_reset_hold | splash_pending;
     wire reset_sdram_wire = RESET | !pll_locked;
 
+    // Cold boot signal: triggered by OSD reset to force BIOS memory test
+    // This clears the warm boot flag at address 0x472
+    wire cold_boot = status[0] | buttons[1];
+
     //////////////////////////////////////////////////////////////////
 
     // TODO: messy, use a single clock domain at least
@@ -1154,6 +1158,8 @@ module emu
 		.wait_count_clk_en                  (~clk_cpu & clk_cpu_ff_2),
 		.ram_read_wait_cycle                (ram_read_wait_cycle),
 		.ram_write_wait_cycle               (ram_write_wait_cycle),
+		.ram_size                           (ram_size),
+		.cold_boot                          (cold_boot),
 		.pause_core                         (pause_core),
 		.cga_hw                             (cga_hw),
 		.hercules_hw                        (hercules_hw_sel),

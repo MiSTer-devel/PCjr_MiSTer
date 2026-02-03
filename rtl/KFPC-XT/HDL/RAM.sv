@@ -45,7 +45,11 @@ module RAM (
     // Wait mode
     input   logic           wait_count_clk_en,
     input   logic   [1:0]   ram_read_wait_cycle,
-    input   logic   [1:0]   ram_write_wait_cycle
+    input   logic   [1:0]   ram_write_wait_cycle,
+    // RAM size selection
+    input   logic   [3:0]   ram_size,  // 0=640KB, 1=576KB, 2=512KB, 3=448KB, 4=384KB, 5=320KB, 6=256KB, 7=192KB, 8=128KB
+    // Cold boot signal (forces BIOS memory test by clearing reset_flag at 0x472)
+    input   logic           cold_boot
 );
 
     typedef enum {IDLE, RAM_WRITE_1, RAM_WRITE_2, RAM_READ_1, RAM_READ_2, COMPLETE_RAM_RW, WAIT} state_t;
@@ -64,6 +68,68 @@ module RAM (
     logic   [1:0]   read_wait_count;
     logic   [1:0]   write_wait_count;
     logic           access_ready;
+
+    //
+    // Cold boot logic: force reset_flag at 0x472-0x473 to return 0
+    // until it has been written, causing BIOS to perform memory test
+    //
+    logic           reset_flag_written;
+    logic           cold_boot_ff1;
+    logic           cold_boot_ff2;
+    wire            cold_boot_pulse = cold_boot_ff1 & ~cold_boot_ff2;
+    wire            is_reset_flag_addr = (address == 20'h00472) | (address == 20'h00473);
+
+    always_ff @(posedge clock, posedge reset) begin
+        if (reset) begin
+            cold_boot_ff1 <= 1'b0;
+            cold_boot_ff2 <= 1'b0;
+        end else begin
+            cold_boot_ff1 <= cold_boot;
+            cold_boot_ff2 <= cold_boot_ff1;
+        end
+    end
+
+    always_ff @(posedge clock, posedge reset) begin
+        if (reset)
+            reset_flag_written <= 1'b0;
+        else if (cold_boot_pulse)
+            reset_flag_written <= 1'b0;  // Clear on cold boot
+        else if (is_reset_flag_addr && ~memory_write_n && ~ram_address_select_n)
+            reset_flag_written <= 1'b1;  // Set when reset_flag address is written
+    end
+
+    //
+    // Memory size limit logic
+    // Conventional RAM ranges based on ram_size setting:
+    // ram_size=0: 640KB (00000-9FFFF)
+    // ram_size=1: 576KB (00000-8FFFF)
+    // ram_size=2: 512KB (00000-7FFFF)
+    // ram_size=3: 448KB (00000-6FFFF)
+    // ram_size=4: 384KB (00000-5FFFF)
+    // ram_size=5: 320KB (00000-4FFFF)
+    // ram_size=6: 256KB (00000-3FFFF)
+    // ram_size=7: 192KB (00000-2FFFF)
+    // ram_size=8: 128KB (00000-1FFFF)
+    //
+    logic ram_within_limit;
+    logic is_upper_memory;
+
+    assign is_upper_memory = (address[19:18] == 2'b11);  // C0000-FFFFF (ROM/BIOS area)
+
+    always_comb begin
+        case (ram_size)
+            4'd0:    ram_within_limit = (address[19:16] <= 4'h9);  // 640KB
+            4'd1:    ram_within_limit = (address[19:16] <= 4'h8);  // 576KB
+            4'd2:    ram_within_limit = (address[19:16] <= 4'h7);  // 512KB
+            4'd3:    ram_within_limit = (address[19:16] <= 4'h6);  // 448KB
+            4'd4:    ram_within_limit = (address[19:16] <= 4'h5);  // 384KB
+            4'd5:    ram_within_limit = (address[19:16] <= 4'h4);  // 320KB
+            4'd6:    ram_within_limit = (address[19:16] <= 4'h3);  // 256KB
+            4'd7:    ram_within_limit = (address[19:16] <= 4'h2);  // 192KB
+            4'd8:    ram_within_limit = (address[19:16] <= 4'h1);  // 128KB
+            default: ram_within_limit = (address[19:16] <= 4'h9);  // Default 640KB
+        endcase
+    end
 
     //
     // RAM Address Select (0x00000-0xAFFFF and 0xC0000-0xFFFFF)
@@ -307,7 +373,10 @@ module RAM (
             data_bus_out_reg    <= data_bus_out_reg;
     end
 
-    assign  data_bus_out = ~read_command ? 0 : ~read_flag ? data_bus_out_reg : access_data_out[7:0];
+    // Force reset_flag at 0x472-0x473 to return 0 after cold boot until written
+    // This ensures BIOS performs memory test on OSD reset
+    wire cold_boot_override = is_reset_flag_addr && ~reset_flag_written;
+    assign  data_bus_out = ~read_command ? 0 : cold_boot_override ? 8'h00 : ~read_flag ? data_bus_out_reg : access_data_out[7:0];
 
 
     //

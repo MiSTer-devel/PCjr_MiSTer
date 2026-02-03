@@ -153,6 +153,10 @@ module CHIPSET #(
         input   logic           wait_count_clk_en,
         input   logic   [1:0]   ram_read_wait_cycle,
         input   logic   [1:0]   ram_write_wait_cycle,
+        // RAM size
+        input   logic   [3:0]   ram_size,
+        // Cold boot (forces BIOS memory test)
+        input   logic           cold_boot,
         // Others
         output  logic           pause_core,
         input   logic           cga_hw,
@@ -418,7 +422,9 @@ module CHIPSET #(
         .enable_a000h                       (enable_a000h),
         .wait_count_clk_en                  (wait_count_clk_en),
         .ram_read_wait_cycle                (ram_read_wait_cycle),
-        .ram_write_wait_cycle               (ram_write_wait_cycle)
+        .ram_write_wait_cycle               (ram_write_wait_cycle),
+        .ram_size                           (ram_size),
+        .cold_boot                          (cold_boot)
     );
 
     assign  data_bus = internal_data_bus;
