@@ -72,8 +72,10 @@ module cga_pixel(
         tandy_color_16 ? video_out :
         (mode_640 && !tandy_color_4) ? {3'b000, pix_640} :
         {2'b00, video_out[2:1]};
-    // PCjr palette mask applies to text and 16-color modes; 4-color/2-color use direct indices.
-    wire pcjr_apply_mask = ~grph_mode || tandy_color_16;
+    // PCjr palette mask applies to text, 16-color, and 640x200x4 modes.
+    // Does NOT apply to 320x200x4 (uses fixed palette entries 0-3) or 640x200x2 (uses entries 0-1).
+    // Reference: PCem vid_pcjr.c - 640x200x4 uses (chr & pcjr->array[1]) for masking.
+    wire pcjr_apply_mask = ~grph_mode || tandy_color_16 || (tandy_color_4 && mode_640);
     wire [3:0] pcjr_masked_index = pcjr_apply_mask ? (pcjr_pixel_index & pcjr_palette_mask) : pcjr_pixel_index;
 
     always_comb

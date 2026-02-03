@@ -273,8 +273,11 @@ module cga(
     end
 */
 
-    // status register (read only at 3BA)
-    // FIXME: vsync_l should be delayed/synced to HCLK.
+    // status register (read only at 0x3DA)
+    // Note: vsync_l is directly from CRTC (active HIGH during vertical sync)
+    // CGA/Tandy: bit 3 = vsync_l, bit 0 = ~display_enable (1 during retrace)
+    // PCjr: bit 3 = vsync_l (1 during retrace), bit 0 = display_enable (1 during active display)
+    // Reference: PCem vid_pcjr.c - stat |= 8 during vsync, bit 0 follows dispon
     assign cga_status_reg = {4'b1111, vsync_l, 2'b10, ~display_enable};
     assign pcjr_status_reg = {3'b000, pcjr_status_toggle, vsync_l, 2'b00, display_enable};
 
@@ -392,12 +395,16 @@ module cga(
     assign pcjr_graphics = pcjr_video & grph_mode;
     assign pcjr_addr_use = (pcjr_addr_mode != 2'b00);
     assign pcjr_addr_hi = (pcjr_addr_mode == 2'b11);
-    // In PCjr graphics modes, bit 13 follows RA0 even when addr_mode=0
-    // (CGA-compatible odd/even line interleave).
-    assign pixel_addr13 = pcjr_graphics ? row_addr[0] :
+    // PCjr addr_mode controls VRAM page interleaving (reference: PCem vid_pcjr.c):
+    //   addr_mode=0 (Alpha): Linear addressing, offset=0, use crtc_addr[12] for bit 13
+    //   addr_mode=1 (Low res): 2-page interleave, offset=(sc&1)*0x2000, use row_addr[0]
+    //   addr_mode=3 (High res): 4-page interleave, offset=(sc&3)*0x2000, use row_addr[0:1]
+    // For non-PCjr (CGA/Tandy), graphics always uses row_addr based interleaving.
+    assign pixel_addr13 = pcjr_graphics ?
+                         (pcjr_addr_use ? row_addr[0] : crtc_addr[12]) :
                          (grph_mode ? row_addr[0] : crtc_addr[12]);
 
-    // Address bit 14 is only used for Tandy/PCjr modes (32K RAM)
+    // Address bit 14 is only used for Tandy/PCjr 32K modes (addr_mode=3)
     assign pixel_addr14 = pcjr_graphics ? (pcjr_addr_hi ? row_addr[1] : 1'b0) :
                          (grph_mode ? row_addr[1] : 1'b0);
 
