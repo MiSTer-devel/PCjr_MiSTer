@@ -210,6 +210,7 @@ module emu
 
     localparam CONF_STR_SYSTEM = "PCjr;UART115200:115200;";
     localparam CONF_STR_ROM = "P1FC1,ROM,PCjr BIOS:;P1-;";
+    localparam CONF_STR_CART = "P1FC2,JRC,Cartridge 1 (JRC):;P1FC3,JRC,Cartridge 2 (JRC):;";
     localparam CONF_STR_TANDY_AUDIO = "P2o23,PCjr Volume,1,2,3,4;";
 
     localparam CONF_STR = {
@@ -222,8 +223,8 @@ module emu
 		"P1O7,Boot Splash Screen,Yes,No;",
 		"P1-;",
 		CONF_STR_ROM,
-		"P1-;",
-		"P1OU,BIOS Writable,No,Yes;",
+        "P1-;",
+		CONF_STR_CART,
 		"P1-;",	
 		"P2,Audio & Video;",
 		"P2-;",
@@ -276,6 +277,8 @@ module emu
     wire [24:0] ioctl_addr;
     wire [15:0] ioctl_data;
     reg         ioctl_wait;
+    wire        info_req = 1'b0;
+    wire [7:0]  info = 8'd0;
 
     wire [21:0] gamma_bus;
 
@@ -346,7 +349,9 @@ module emu
 		.ioctl_wr(ioctl_wr),
 		.ioctl_addr(ioctl_addr),
 		.ioctl_dout(ioctl_data),
-		.ioctl_wait(ioctl_wait)
+		.ioctl_wait(ioctl_wait),
+		.info_req(info_req),
+		.info(info)
 	);
 
 
@@ -412,7 +417,8 @@ module emu
 		.locked(pll_locked)
 	);
 
-    wire reset_wire = RESET | status[0] | buttons[1] | !pll_locked | splashscreen | splash_reset_hold | splash_pending;
+    wire reset_wire = RESET | status[0] | buttons[1] | !pll_locked | splashscreen |
+                      splash_reset_hold | splash_pending;
     wire reset_sdram_wire = RESET | !pll_locked;
 
     // Cold boot signal: triggered by OSD reset to force BIOS memory test
@@ -659,7 +665,7 @@ module emu
     ///////////////////////   BIOS LOADER   ////////////////////////////
     //
 
-    reg [4:0]  bios_load_state = 4'h0;
+    reg [3:0]  bios_load_state = 4'h0;
     reg [1:0]  bios_protect_flag;
     reg        bios_access_request;
     reg [19:0] bios_access_address;
@@ -668,55 +674,115 @@ module emu
     reg [7:0]  bios_write_wait_cnt;
     reg        bios_write_byte_cnt;
     reg        tandy_bios_write;
-    wire       bios_writable = status[30];
-    wire [1:0] bios_protect_default = {~bios_writable, 1'b0};
+    wire [1:0] bios_protect_default = 2'b11;
     wire select_tandy = (ioctl_index[5:0] == 1) && (ioctl_addr[24:16] == 9'b000000000);
 
-    wire [19:0] bios_access_address_wire = select_tandy ? { 4'b1111, ioctl_addr[15:0]} :
-         20'hFFFFF;
+    // Cartridge support:
+    // JRC files have 512 byte header with load address at offset 0x1CF
+    // index 2 = Cartridge 1 (JRC), index 3 = Cartridge 2 (JRC)
+    wire select_cart_1 = (ioctl_index[5:0] == 2);
+    wire select_cart_2 = (ioctl_index[5:0] == 3);
+    wire select_cart = select_cart_1 | select_cart_2;
 
-    wire bios_load_n = ~(ioctl_download & select_tandy);
+    // Boot-only window for cart downloads.
+    localparam [24:0] CART_BOOT_WINDOW = 25'd28000000;
+    reg [24:0] cart_boot_cnt = 25'd0;
+
+    // Upper ROM clear on cold boot (C0000-EFFFF).
+    localparam [19:0] CART_CLEAR_START = 20'hC0000;
+    localparam [16:0] CART_CLEAR_WORDS = 17'h18000; // 192KB / 2 bytes
+    reg        cart_clear_pending = 1'b1;
+    reg        cart_clear_active = 1'b0;
+    reg [16:0] cart_clear_words_left = 17'd0;
+    wire       cart_clear_busy = cart_clear_pending | cart_clear_active;
+
+    // JRC header parsing: load address is at offset 0x1CF (segment high byte)
+    reg [7:0] jrc_load_segment = 8'hE0;  // Default to E0000
+    wire cart_boot_window = (cart_boot_cnt != 0);
+    wire cart_download_allowed = cart_boot_window && ~cart_clear_pending && ~cart_clear_active;
+    wire select_cart_active = select_cart && cart_download_allowed;
+    wire jrc_addr_capture = select_cart_active && ioctl_wr && (ioctl_addr == 25'h1CE);
+
+    always @(posedge clk_chipset, posedge reset_sdram) begin
+        if (reset_sdram)
+            jrc_load_segment <= 8'hE0;
+        else if (jrc_addr_capture)
+            jrc_load_segment <= ioctl_data[15:8];  // High byte of word at 0x1CE-0x1CF
+    end
+
+    // Calculate base address from segment (e.g., D0->D0000, E0->E0000, E6->E6000)
+    wire [19:0] cart_base_addr = {jrc_load_segment, 12'h000};
+
+    // JRC header is 512 bytes
+    wire cart_header_done = (ioctl_addr >= 25'h200);
+    wire [24:0] cart_offset_full = ioctl_addr - 25'h200;
+    wire [15:0] cart_offset = cart_offset_full[15:0];
+    wire cart_in_range = (cart_offset_full < 25'h10000);  // Max 64KB per cartridge
+
+    wire download_active = ioctl_download & (select_tandy | select_cart_active);
+
+    wire [19:0] bios_access_address_wire = select_tandy ? {4'b1111, ioctl_addr[15:0]} :
+                                           select_cart_active ? (cart_base_addr + {4'b0, cart_offset}) :
+                                           20'hFFFFF;
+
+    wire bios_load_n = ~(ioctl_download & (select_tandy | (select_cart_active & cart_header_done & cart_in_range)));
 
     always @(posedge clk_chipset, posedge reset_sdram)
     begin
         if (reset_sdram)
         begin
-            bios_protect_flag   <= 2'b11;
-            bios_access_request <= 1'b0;
-            bios_access_address <= 20'hFFFFF;
-            bios_write_data     <= 16'hFFFF;
-            bios_write_n        <= 1'b1;
-            bios_write_wait_cnt <= 'h0;
-            bios_write_byte_cnt <= 1'h0;
-            tandy_bios_write    <= 1'b0;
-            ioctl_wait          <= 1'b1;
-            bios_load_state     <= 4'h00;
+            bios_protect_flag      <= 2'b11;
+            bios_access_request    <= 1'b0;
+            bios_access_address    <= 20'hFFFFF;
+            bios_write_data        <= 16'hFFFF;
+            bios_write_n           <= 1'b1;
+            bios_write_wait_cnt    <= 'h0;
+            bios_write_byte_cnt    <= 1'h0;
+            tandy_bios_write       <= 1'b0;
+            ioctl_wait             <= 1'b1;
+            bios_load_state        <= 4'h00;
+            cart_clear_pending     <= 1'b1;
+            cart_clear_active      <= 1'b0;
+            cart_clear_words_left  <= 17'd0;
+            cart_boot_cnt          <= 25'd0;
         end
         else if (~initilized_sdram)
         begin
-            bios_protect_flag   <= 2'b11;
-            bios_access_request <= 1'b0;
-            bios_access_address <= 20'hFFFFF;
-            bios_write_data     <= 16'hFFFF;
-            bios_write_n        <= 1'b1;
-            bios_write_wait_cnt <= 'h0;
-            bios_write_byte_cnt <= 1'h0;
-            ioctl_wait          <= 1'b1;
-            bios_load_state     <= 4'h00;
+            bios_protect_flag      <= 2'b11;
+            bios_access_request    <= 1'b0;
+            bios_access_address    <= 20'hFFFFF;
+            bios_write_data        <= 16'hFFFF;
+            bios_write_n           <= 1'b1;
+            bios_write_wait_cnt    <= 'h0;
+            bios_write_byte_cnt    <= 1'h0;
+            ioctl_wait             <= 1'b1;
+            bios_load_state        <= 4'h00;
+            cart_clear_pending     <= 1'b1;
+            cart_clear_active      <= 1'b0;
+            cart_clear_words_left  <= 17'd0;
+            cart_boot_cnt          <= 25'd0;
         end
         else
         begin
+            if (cart_boot_cnt != 0)
+            begin
+                if (ioctl_download)
+                    cart_boot_cnt <= CART_BOOT_WINDOW;
+                else
+                    cart_boot_cnt <= cart_boot_cnt - 25'd1;
+            end
+
             casez (bios_load_state)
                 4'h00:
                 begin
-                    bios_protect_flag   <= bios_protect_default;  // bios_writable
+                    bios_protect_flag   <= bios_protect_default;  // protect upper ROM
                     bios_access_address <= 20'hFFFFF;
                     bios_write_data     <= 16'hFFFF;
                     bios_write_n        <= 1'b1;
                     bios_write_wait_cnt <= 'h0;
                     bios_write_byte_cnt <= 1'h0;
                     tandy_bios_write    <= 1'b0;
-                    if (~ioctl_download)
+                    if (~download_active && ~cart_clear_pending)
                     begin
                         bios_access_request <= 1'b0;
                         ioctl_wait          <= 1'b0;
@@ -724,10 +790,12 @@ module emu
                     else
                     begin
                         bios_access_request <= 1'b1;
-                        ioctl_wait          <= 1'b1;
+                        ioctl_wait          <= cart_clear_busy ? 1'b1 : download_active;
                     end
 
-                    if ((ioctl_download) && (~processor_ready) && (address_direction))
+                    if (cart_clear_pending && address_direction)
+                        bios_load_state <= 4'h05;
+                    else if (download_active && (~processor_ready) && (address_direction))
                         bios_load_state <= 4'h01;
                     else
                         bios_load_state <= 4'h00;
@@ -738,7 +806,7 @@ module emu
                     bios_access_request <= 1'b1;
                     bios_write_byte_cnt <= 1'h0;
                     tandy_bios_write    <= select_tandy;
-                    if (~ioctl_download)
+                    if (~download_active)
                     begin
                         bios_access_address <= 20'hFFFFF;
                         bios_write_data     <= 16'hFFFF;
@@ -765,6 +833,22 @@ module emu
                         ioctl_wait          <= 1'b1;
                         bios_load_state     <= 4'h02;
                     end
+                end
+                4'h05:
+                begin
+                    bios_protect_flag     <= 2'b00;
+                    bios_access_request   <= 1'b1;
+                    bios_access_address   <= CART_CLEAR_START;
+                    bios_write_data       <= 16'h0000;
+                    bios_write_n          <= 1'b1;
+                    bios_write_wait_cnt   <= 'h0;
+                    bios_write_byte_cnt   <= 1'h0;
+                    tandy_bios_write      <= 1'b0;
+                    ioctl_wait            <= 1'b1;
+                    cart_clear_pending    <= 1'b0;
+                    cart_clear_active     <= 1'b1;
+                    cart_clear_words_left <= CART_CLEAR_WORDS;
+                    bios_load_state       <= 4'h02;
                 end
                 4'h02:
                 begin
@@ -817,9 +901,26 @@ module emu
                     tandy_bios_write    <= 1'b0;
                     ioctl_wait          <= 1'b1;
                     if (bios_write_byte_cnt == 1'b0)
-                        bios_load_state     <= 4'h02;
+                    begin
+                        bios_load_state <= 4'h02;
+                    end
+                    else if (cart_clear_active)
+                    begin
+                        if (cart_clear_words_left == 17'd1)
+                        begin
+                            cart_clear_active     <= 1'b0;
+                            cart_clear_words_left <= 17'd0;
+                            cart_boot_cnt         <= CART_BOOT_WINDOW;
+                            bios_load_state       <= 4'h00;
+                        end
+                        else
+                        begin
+                            cart_clear_words_left <= cart_clear_words_left - 17'd1;
+                            bios_load_state       <= 4'h02;
+                        end
+                    end
                     else
-                        bios_load_state     <= 4'h01;
+                        bios_load_state <= 4'h01;
                 end
                 default:
                 begin
@@ -833,6 +934,7 @@ module emu
                     tandy_bios_write    <= 1'b0;
                     ioctl_wait          <= 1'b0;
                     bios_load_state     <= 4'h00;
+                    cart_clear_active   <= 1'b0;
                 end
             endcase
         end

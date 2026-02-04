@@ -144,7 +144,9 @@ module RAM (
     //
     // Write protect
     //
-    assign write_protect = bios_protect_flag[1] & (address[19:16] == 4'b1111);
+    wire upper_cart_area = (address[19:16] >= 4'hC) && (address[19:16] <= 4'hE);
+    assign write_protect = (bios_protect_flag[1] & (address[19:16] == 4'hF)) |
+                           (bios_protect_flag[0] & upper_cart_area);
 
 
     //
