@@ -218,6 +218,8 @@ module emu
 		"S0,IMGIMAVFD,Floppy A:;",
 		"OJ,Write Protect,No,Yes;",
 		"-;",
+		"O36,RAM Size,128KB,192KB,256KB,320KB,384KB,448KB,512KB,576KB,640KB;",
+		"-;",
 		"P1,System & BIOS;",
 		"P1-;",
 		"P1O7,Boot Splash Screen,Yes,No;",
@@ -292,6 +294,7 @@ module emu
     wire [1:0] ar = status[9:8];
     wire border = status[29] | xtctl[1];
     wire a000h = 1'b0;
+    reg  [3:0] ram_size;  // Latched on reset; OSD changes take effect after next reset
 
     reg [1:0]   scale_video_ff;
     reg [2:0]   screen_mode_video_ff;
@@ -424,6 +427,13 @@ module emu
     // Cold boot signal: triggered by OSD reset to force BIOS memory test
     // This clears the warm boot flag at address 0x472
     wire cold_boot = status[0] | buttons[1];
+
+    // RAM size is latched during reset; OSD changes only take effect after
+    // the next reset (OSD reset button or physical button press)
+    always @(posedge clk_chipset or posedge reset_wire) begin
+        if (reset_wire)
+            ram_size <= status[6:3];
+    end
 
     //////////////////////////////////////////////////////////////////
 

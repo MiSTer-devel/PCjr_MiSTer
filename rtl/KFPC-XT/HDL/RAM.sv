@@ -47,7 +47,7 @@ module RAM (
     input   logic   [1:0]   ram_read_wait_cycle,
     input   logic   [1:0]   ram_write_wait_cycle,
     // RAM size selection
-    input   logic   [3:0]   ram_size,  // 0=640KB, 1=576KB, 2=512KB, 3=448KB, 4=384KB, 5=320KB, 6=256KB, 7=192KB, 8=128KB
+    input   logic   [3:0]   ram_size,  // 0=128KB, 1=192KB, 2=256KB, 3=320KB, 4=384KB, 5=448KB, 6=512KB, 7=576KB, 8=640KB
     // Cold boot signal (forces BIOS memory test by clearing reset_flag at 0x472)
     input   logic           cold_boot
 );
@@ -101,15 +101,15 @@ module RAM (
     //
     // Memory size limit logic
     // Conventional RAM ranges based on ram_size setting:
-    // ram_size=0: 640KB (00000-9FFFF)
-    // ram_size=1: 576KB (00000-8FFFF)
-    // ram_size=2: 512KB (00000-7FFFF)
-    // ram_size=3: 448KB (00000-6FFFF)
+    // ram_size=0: 128KB (00000-1FFFF)
+    // ram_size=1: 192KB (00000-2FFFF)
+    // ram_size=2: 256KB (00000-3FFFF)
+    // ram_size=3: 320KB (00000-4FFFF)
     // ram_size=4: 384KB (00000-5FFFF)
-    // ram_size=5: 320KB (00000-4FFFF)
-    // ram_size=6: 256KB (00000-3FFFF)
-    // ram_size=7: 192KB (00000-2FFFF)
-    // ram_size=8: 128KB (00000-1FFFF)
+    // ram_size=5: 448KB (00000-6FFFF)
+    // ram_size=6: 512KB (00000-7FFFF)
+    // ram_size=7: 576KB (00000-8FFFF)
+    // ram_size=8: 640KB (00000-9FFFF)
     //
     logic ram_within_limit;
     logic is_upper_memory;
@@ -118,24 +118,27 @@ module RAM (
 
     always_comb begin
         case (ram_size)
-            4'd0:    ram_within_limit = (address[19:16] <= 4'h9);  // 640KB
-            4'd1:    ram_within_limit = (address[19:16] <= 4'h8);  // 576KB
-            4'd2:    ram_within_limit = (address[19:16] <= 4'h7);  // 512KB
-            4'd3:    ram_within_limit = (address[19:16] <= 4'h6);  // 448KB
+            4'd0:    ram_within_limit = (address[19:16] <= 4'h1);  // 128KB
+            4'd1:    ram_within_limit = (address[19:16] <= 4'h2);  // 192KB
+            4'd2:    ram_within_limit = (address[19:16] <= 4'h3);  // 256KB
+            4'd3:    ram_within_limit = (address[19:16] <= 4'h4);  // 320KB
             4'd4:    ram_within_limit = (address[19:16] <= 4'h5);  // 384KB
-            4'd5:    ram_within_limit = (address[19:16] <= 4'h4);  // 320KB
-            4'd6:    ram_within_limit = (address[19:16] <= 4'h3);  // 256KB
-            4'd7:    ram_within_limit = (address[19:16] <= 4'h2);  // 192KB
-            4'd8:    ram_within_limit = (address[19:16] <= 4'h1);  // 128KB
-            default: ram_within_limit = (address[19:16] <= 4'h9);  // Default 640KB
+            4'd5:    ram_within_limit = (address[19:16] <= 4'h6);  // 448KB
+            4'd6:    ram_within_limit = (address[19:16] <= 4'h7);  // 512KB
+            4'd7:    ram_within_limit = (address[19:16] <= 4'h8);  // 576KB
+            4'd8:    ram_within_limit = (address[19:16] <= 4'h9);  // 640KB
+            default: ram_within_limit = (address[19:16] <= 4'h1);  // Default 128KB
         endcase
     end
 
     //
     // RAM Address Select (0x00000-0xAFFFF and 0xC0000-0xFFFFF)
+    // Now also considers ram_size limit for conventional memory
     //
-    assign ram_address_select_n = ~(enable_sdram && ~(address[19:16] == 4'b1011) &&  // B0000h reserved for VRAM
-	                               ~(address[19:16] == 4'b1010));                     // A0000h is disabled
+    assign ram_address_select_n = ~(enable_sdram &&
+                                   ~(address[19:16] == 4'b1011) &&  // B0000h reserved for VRAM
+                                   ~(address[19:16] == 4'b1010) &&  // A0000h is disabled
+                                   (is_upper_memory || ram_within_limit));  // Upper memory (ROM) always accessible, conventional RAM limited by size
 	 
 
     assign tandy_bios_select    = tandy_bios_flag & (address[19:16] == 4'b1111);
