@@ -226,7 +226,8 @@ module KFPS2KB #(
         else if (clear_keycode) begin
             irq         <= 1'b0;
             keycode     <= 8'h00;
-            break_flag  <= 1'b0;
+            // Don't clear break_flag here! It needs to persist for F0 break sequences
+            // break_flag will be cleared when the actual scancode is processed
         end
         else if (error_flag) begin
             // Error
@@ -248,9 +249,17 @@ module KFPS2KB #(
                 break_flag  <= 1'b0;
             end
             else if (register == 8'hF0) begin
+                // Break prefix - set flag, don't generate IRQ
                 irq         <= 1'b0;
                 keycode     <= 8'h00;
                 break_flag  <= 1'b1;
+            end
+            else if (register == 8'hE0 || register == 8'hE1) begin
+                // Extended key prefix - ignore, don't generate IRQ
+                // The actual scancode will follow and be processed normally
+                irq         <= 1'b0;
+                keycode     <= 8'h00;
+                // Don't change break_flag - it may be set from a previous F0
             end
             else if (register == 8'h78) begin
                 // F11: CGA <-> Hercules (PCXT), RGB <-> Composite (Tandy)

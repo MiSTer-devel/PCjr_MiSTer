@@ -427,7 +427,6 @@ module PERIPHERALS #(
     logic           uart2_irq;
     logic   [7:0]   keycode_buf;
     logic   [7:0]   keycode;
-    logic   [7:0]   tandy_keycode_conv;
     logic           prev_ps2_reset;
     logic           prev_ps2_reset_n;
     logic           lock_recv_clock;
@@ -470,97 +469,228 @@ module PERIPHERALS #(
     assign  keycode = ps2_reset_n ? keycode_buf : 8'h80;
 
     // PCjr IR keyboard encoder
-    localparam [15:0] PCJR_BIT_PHASE_CYCLE = 16'd22000 - 16'd1;
-    logic   [9:0]   pcjr_shift_register;
-    logic   [3:0]   pcjr_send_count;
-    logic           pcjr_shift;
-    logic   [15:0]  pcjr_phase_cycle_count;
-    logic           pcjr_bit_1_signal;
-    wire            pcjr_bit_0_signal = ~pcjr_bit_1_signal;
-    wire            pcjr_sending = |pcjr_send_count;
-    wire    [1:0]   pcjr_send_code = {pcjr_sending, pcjr_shift_register[0]};
+    // Protocol: Manchester encoding with 42 half-bits per frame
+    // Format: Start(2) + Data(16) + Parity(2) + Stop(22) = 42 half-bits
+    // Each data/parity bit transmitted as [value, ~value]
+    // Timing: ~220us per half-bit = 11000 cycles at 50MHz
+    localparam [15:0] PCJR_HALF_BIT_CYCLE = 16'd11000 - 16'd1;
 
+    // Keycode queue (16 entries, matching PCem) to avoid losing keys during transmission
+    logic   [7:0]   pcjr_key_queue[0:15];
+    logic   [3:0]   pcjr_queue_head;    // Read pointer
+    logic   [3:0]   pcjr_queue_tail;    // Write pointer
+    wire            pcjr_queue_empty = (pcjr_queue_head == pcjr_queue_tail);
+    wire    [7:0]   pcjr_queue_front = pcjr_key_queue[pcjr_queue_head];
+
+    logic   [7:0]   pcjr_scancode;      // Scancode being transmitted
+    logic   [5:0]   pcjr_half_bit_pos;  // Position in 42 half-bit frame (0-41)
+    logic   [15:0]  pcjr_phase_count;   // Cycle counter for timing
+    logic           pcjr_sending;       // Transmission in progress
+    logic           pcjr_parity;        // Odd parity bit
+    logic           pcjr_current_bit;   // Current half-bit value to transmit
+
+    // Flag to track if we've already processed the current IRQ
+    logic pcjr_irq_processed;
+
+    // Typematic rate limiter - limits auto-repeat to ~10 chars/second like real PCjr keyboard
+    // At 50MHz: 100ms = 5,000,000 cycles, use 23-bit counter
+    localparam [22:0] PCJR_TYPEMATIC_PERIOD = 23'd5000000 - 23'd1;  // ~100ms between repeats
+    logic [22:0] pcjr_typematic_timer;
+    logic [6:0]  pcjr_last_make_key;     // Last make code (without bit 7) for typematic
+    wire         pcjr_typematic_active = |pcjr_typematic_timer;  // Timer still running
+
+    // Check if incoming keycode should be filtered:
+    // - It's a make code (bit 7 clear)
+    // - Same key as last make code
+    // - Typematic timer is still running
+    wire pcjr_is_repeat_filtered = !keycode_buf[7] &&
+                                   (keycode_buf[6:0] == pcjr_last_make_key) &&
+                                   pcjr_typematic_active;
+
+    // IRQ handling and queue management
+    // Note: E0/E1 prefixes are now handled inside KFPS2KB and don't generate IRQ
+    // Typematic throttling: limit auto-repeat rate to ~10 chars/second
     always_ff @(posedge clock, posedge reset)
     begin
-        if (reset)
-            pcjr_shift_register <= 10'b1111111111;
-        else if (pcjr_shift)
-            pcjr_shift_register <= {1'b1, pcjr_shift_register[9:1]};
-        else if (~pcjr_sending & keybord_irq)
-            pcjr_shift_register <= {1'b1, keycode_buf, 1'b1};
-        else
-            pcjr_shift_register <= pcjr_shift_register;
-    end
-
-    always_ff @(posedge clock, posedge reset)
-    begin
-        if (reset)
-        begin
-            pcjr_send_count     <= 4'd0;
-            pcjr_shift          <= 1'b0;
-            pcjr_clear_keycode  <= 1'b0;
+        if (reset) begin
+            pcjr_clear_keycode <= 1'b0;
+            pcjr_irq_processed <= 1'b0;
+            pcjr_queue_tail <= 4'd0;
+            pcjr_typematic_timer <= 23'd0;
+            pcjr_last_make_key <= 7'd0;
+            pcjr_key_queue[0]  <= 8'h00;
+            pcjr_key_queue[1]  <= 8'h00;
+            pcjr_key_queue[2]  <= 8'h00;
+            pcjr_key_queue[3]  <= 8'h00;
+            pcjr_key_queue[4]  <= 8'h00;
+            pcjr_key_queue[5]  <= 8'h00;
+            pcjr_key_queue[6]  <= 8'h00;
+            pcjr_key_queue[7]  <= 8'h00;
+            pcjr_key_queue[8]  <= 8'h00;
+            pcjr_key_queue[9]  <= 8'h00;
+            pcjr_key_queue[10] <= 8'h00;
+            pcjr_key_queue[11] <= 8'h00;
+            pcjr_key_queue[12] <= 8'h00;
+            pcjr_key_queue[13] <= 8'h00;
+            pcjr_key_queue[14] <= 8'h00;
+            pcjr_key_queue[15] <= 8'h00;
         end
-        else if (~|pcjr_phase_cycle_count)
-        begin
-            if (|pcjr_send_count)
-            begin
-                pcjr_send_count     <= pcjr_send_count - 4'd1;
-                pcjr_clear_keycode  <= 1'b0;
-                pcjr_shift          <= 1'b1;
+        else begin
+            // Decrement typematic timer
+            if (pcjr_typematic_active)
+                pcjr_typematic_timer <= pcjr_typematic_timer - 23'd1;
+
+            if (keybord_irq && !pcjr_irq_processed) begin
+                // New keycode arrived - process it once
+                pcjr_clear_keycode <= 1'b1;
+                pcjr_irq_processed <= 1'b1;
+
+                // Enqueue logic with typematic filtering:
+                // - Break codes (bit 7 set): ALWAYS enqueue, reset timer
+                // - Make codes: only enqueue if not filtered by typematic timer
+                if (keycode_buf[7]) begin
+                    // Break code - always enqueue, clear typematic state
+                    pcjr_key_queue[pcjr_queue_tail] <= keycode_buf;
+                    pcjr_queue_tail <= pcjr_queue_tail + 4'd1;
+                    pcjr_typematic_timer <= 23'd0;  // Allow immediate re-press
+                end
+                else if (!pcjr_is_repeat_filtered) begin
+                    // Make code - enqueue and start typematic timer
+                    pcjr_key_queue[pcjr_queue_tail] <= keycode_buf;
+                    pcjr_queue_tail <= pcjr_queue_tail + 4'd1;
+                    pcjr_last_make_key <= keycode_buf[6:0];
+                    pcjr_typematic_timer <= PCJR_TYPEMATIC_PERIOD;
+                end
+                // else: filtered repeat - don't enqueue, don't reset timer
             end
-            else if (keybord_irq)
-            begin
-                pcjr_send_count     <= 4'd10;
-                pcjr_clear_keycode  <= 1'b1;
-                pcjr_shift          <= 1'b0;
+            else if (!keybord_irq) begin
+                // IRQ cleared - ready for next keycode
+                pcjr_clear_keycode <= 1'b0;
+                pcjr_irq_processed <= 1'b0;
             end
-            else
-            begin
-                pcjr_send_count     <= pcjr_send_count;
-                pcjr_clear_keycode  <= 1'b0;
-                pcjr_shift          <= 1'b0;
+            else begin
+                // IRQ still high but already processed
+                pcjr_clear_keycode <= 1'b0;
             end
-        end
-        else
-        begin
-            pcjr_send_count     <= pcjr_send_count;
-            pcjr_clear_keycode  <= 1'b0;
-            pcjr_shift          <= 1'b0;
         end
     end
 
+    // State machine for frame transmission
+    always_ff @(posedge clock, posedge reset)
+    begin
+        if (reset) begin
+            pcjr_scancode       <= 8'h00;
+            pcjr_half_bit_pos   <= 6'd0;
+            pcjr_sending        <= 1'b0;
+            pcjr_parity         <= 1'b0;
+            pcjr_queue_head     <= 4'd0;
+        end
+        else if (~pcjr_sending) begin
+            // Idle - check queue for pending keycodes
+            // IMPORTANT: Only start transmission when:
+            //   1. Queue not empty
+            //   2. Previous key was acknowledged (keybd_latch cleared by reading port 0xA0)
+            // This matches PCem behavior which waits for !latched before sending next key
+            if (!pcjr_queue_empty && !keybd_latch) begin
+                // Dequeue and start transmission
+                pcjr_scancode       <= pcjr_queue_front;
+                pcjr_half_bit_pos   <= 6'd0;
+                pcjr_sending        <= 1'b1;
+                pcjr_parity         <= ^pcjr_queue_front;  // Calculate parity
+                pcjr_queue_head     <= pcjr_queue_head + 4'd1;
+            end
+        end
+        else begin
+            // Sending - advance half-bit position on timer expiry
+            if (~|pcjr_phase_count) begin
+                if (pcjr_half_bit_pos == 6'd41) begin
+                    // Frame complete
+                    pcjr_sending      <= 1'b0;
+                    pcjr_half_bit_pos <= 6'd0;
+                end
+                else begin
+                    pcjr_half_bit_pos <= pcjr_half_bit_pos + 6'd1;
+                end
+            end
+        end
+    end
+
+    // Timer for half-bit timing (~220us)
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
-            pcjr_phase_cycle_count <= PCJR_BIT_PHASE_CYCLE;
-        else if (~|pcjr_phase_cycle_count)
-            pcjr_phase_cycle_count <= PCJR_BIT_PHASE_CYCLE;
+            pcjr_phase_count <= PCJR_HALF_BIT_CYCLE;
+        else if (~pcjr_sending)
+            pcjr_phase_count <= PCJR_HALF_BIT_CYCLE;
+        else if (~|pcjr_phase_count)
+            pcjr_phase_count <= PCJR_HALF_BIT_CYCLE;
         else
-            pcjr_phase_cycle_count <= pcjr_phase_cycle_count - 1'd1;
+            pcjr_phase_count <= pcjr_phase_count - 16'd1;
     end
 
+    // Determine current bit value based on position in frame
+    // Frame structure (42 half-bits):
+    //   [0-1]:   Start bit = 1 -> transmit [1,0]
+    //   [2-17]:  Data bits (8 bits, LSB first) -> each bit transmits [value, ~value]
+    //   [18-19]: Parity bit -> transmit [parity, ~parity]
+    //   [20-41]: Stop bits (11 bits) = 0 -> all zeros
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
-            pcjr_bit_1_signal <= 1'b1;
-        else if (pcjr_phase_cycle_count == PCJR_BIT_PHASE_CYCLE)
-            pcjr_bit_1_signal <= 1'b0;
-        else if (pcjr_phase_cycle_count == {1'b0, PCJR_BIT_PHASE_CYCLE[15:1]})
-            pcjr_bit_1_signal <= 1'b1;
-        else
-            pcjr_bit_1_signal <= pcjr_bit_1_signal;
+            pcjr_current_bit <= 1'b0;
+        else if (pcjr_sending) begin
+            case (pcjr_half_bit_pos)
+                // Start bit: [1, 0]
+                6'd0:  pcjr_current_bit <= 1'b1;
+                6'd1:  pcjr_current_bit <= 1'b0;
+                // Data bit 0 (LSB)
+                6'd2:  pcjr_current_bit <= pcjr_scancode[0];
+                6'd3:  pcjr_current_bit <= ~pcjr_scancode[0];
+                // Data bit 1
+                6'd4:  pcjr_current_bit <= pcjr_scancode[1];
+                6'd5:  pcjr_current_bit <= ~pcjr_scancode[1];
+                // Data bit 2
+                6'd6:  pcjr_current_bit <= pcjr_scancode[2];
+                6'd7:  pcjr_current_bit <= ~pcjr_scancode[2];
+                // Data bit 3
+                6'd8:  pcjr_current_bit <= pcjr_scancode[3];
+                6'd9:  pcjr_current_bit <= ~pcjr_scancode[3];
+                // Data bit 4
+                6'd10: pcjr_current_bit <= pcjr_scancode[4];
+                6'd11: pcjr_current_bit <= ~pcjr_scancode[4];
+                // Data bit 5
+                6'd12: pcjr_current_bit <= pcjr_scancode[5];
+                6'd13: pcjr_current_bit <= ~pcjr_scancode[5];
+                // Data bit 6
+                6'd14: pcjr_current_bit <= pcjr_scancode[6];
+                6'd15: pcjr_current_bit <= ~pcjr_scancode[6];
+                // Data bit 7 (MSB / break flag)
+                6'd16: pcjr_current_bit <= pcjr_scancode[7];
+                6'd17: pcjr_current_bit <= ~pcjr_scancode[7];
+                // Parity bit (odd parity)
+                6'd18: pcjr_current_bit <= pcjr_parity;
+                6'd19: pcjr_current_bit <= ~pcjr_parity;
+                // Stop bits (positions 20-41): all zeros
+                default: pcjr_current_bit <= 1'b0;
+            endcase
+        end
+        else begin
+            pcjr_current_bit <= 1'b0;
+        end
     end
 
+    // Output keyboard data signal
+    // Note: pcjr_keybd_in = ~pcjr_kbd_data, so we invert here
+    // When sending: output inverted current bit value
+    // When idle: output HIGH (1) -> pcjr_keybd_in will be LOW (idle state)
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
             pcjr_kbd_data <= 1'b1;
+        else if (pcjr_sending)
+            pcjr_kbd_data <= ~pcjr_current_bit;
         else
-            casez (pcjr_send_code)
-                2'b10:  pcjr_kbd_data <= pcjr_bit_0_signal;
-                2'b11:  pcjr_kbd_data <= pcjr_bit_1_signal;
-                default:pcjr_kbd_data <= 1'b1;
-            endcase
+            pcjr_kbd_data <= 1'b1;
     end
 
     always_ff @(posedge clock, posedge reset)
@@ -605,17 +735,6 @@ module PERIPHERALS #(
         .send_request               (~prev_ps2_reset_n & ps2_reset_n),
         .send_data                  (8'hFF)
     );
-
-    // Convert Tandy scancode
-    Tandy_Scancode_Converter u_Tandy_Scancode_Converter 
-    (
-        .clock                      (clock),
-        .reset                      (reset),
-        .scancode                   (keycode),
-        .keybord_irq                (keybord_irq),
-        .convert_data               (tandy_keycode_conv)
-    );
-    wire [7:0] tandy_keycode = tandy_keycode_conv;
 
     always_ff @(posedge clock, posedge reset)
     begin
@@ -749,19 +868,12 @@ end
         end
     end
 
-    logic   [7:0]   keycode_ff;
     always_ff @(posedge clock, posedge reset)
     begin
         if (reset)
-        begin
-            keycode_ff  <= 8'h00;
             port_a_in   <= 8'hFF;
-        end
         else
-        begin
-            keycode_ff  <= tandy_keycode;
             port_a_in   <= 8'hFF;
-        end
     end
 
     reg [7:0] lpt_reg = 8'hFF;
