@@ -386,41 +386,39 @@ module emu
     ///////////////////////   CLOCKS   /////////////////////////////
     //
 
-    wire clk_sys;
     wire pll_locked;
 
     wire clk_100;
     wire clk_28_636;
-    wire clk_56_875;
-    wire clk_113_750;
-    reg clk_25 = 1'b0;
-    reg clk_14_318 = 1'b0;
-    reg clk_9_54 = 1'b0;
-    reg clk_7_16 = 1'b0;
     wire clk_4_77;
+    reg  clk_14_318 = 1'b0;
     wire clk_cpu;
     wire pclk;
     wire clk_chipset;
     wire peripheral_clock;
-    wire clk_uart;
 
     localparam [27:0] cur_rate = 28'd50000000;
 
-    pll pll 
+    pll pll
 	(
 		.refclk(CLK_50M),
 		.rst(0),
 		.outclk_0(clk_100),
-		.outclk_1(clk_56_875),
-		.outclk_2(clk_28_636),
-		.outclk_3(clk_uart),
-		//.outclk_4(clk_opl2),
-		.outclk_5(clk_chipset),
-		.outclk_6(clk_113_750),
+		.outclk_1(clk_chipset),
 		.locked(pll_locked)
 	);
 
-    wire reset_wire = RESET | status[0] | buttons[1] | !pll_locked | splashscreen |
+    wire pll_system_locked;
+
+    pll_system pll_system_inst (
+        .refclk(CLK_50M),
+        .rst(0),
+        .outclk_0(clk_28_636),
+        .outclk_1(clk_4_77),
+        .locked(pll_system_locked)
+    );
+
+    wire reset_wire = RESET | status[0] | buttons[1] | !pll_locked | !pll_system_locked | splashscreen |
                       splash_reset_hold | splash_pending;
     wire reset_sdram_wire = RESET | !pll_locked;
 
@@ -447,55 +445,20 @@ module emu
         ce_pixel_cga <= clk_14_318;	//if outside always block appears an overscan column in CGA mode
     end
 
-    reg [4:0] clk_9_54_cnt = 1'b0;
-    always @(posedge clk_chipset)
-        if (4'd0 == clk_9_54_cnt) begin
-            if (clk_9_54)
-                clk_9_54_cnt  <= 4'd3 - 4'd1;
-            else
-                clk_9_54_cnt  <= 4'd2 - 4'd1;
-            clk_9_54      <= ~clk_9_54;
-        end
-        else begin
-            clk_9_54_cnt  <= clk_9_54_cnt - 4'd1;
-            clk_9_54      <= clk_9_54;
-        end
-
-    always @(posedge clk_chipset)
-        clk_25 <= ~clk_25;
-
-    always @(posedge clk_14_318)
-        clk_7_16 <= ~clk_7_16;      // 7.16Mhz
-
-    clk_div3 clk_normal             // 4.77MHz
-    (
-        .clk(clk_14_318),
-        .clk_out(clk_4_77)
-    );
-
     always @(posedge clk_4_77)
         peripheral_clock <= ~peripheral_clock; // 2.385Mhz
 
     //////////////////////////////////////////////////////////////////
 
     logic  biu_done;
-    logic  [7:0] clock_cycle_counter_division_ratio;
-    logic  [7:0] clock_cycle_counter_decrement_value;
-    logic        shift_read_timing;
-    logic  [1:0] ram_read_wait_cycle;
-    logic  [1:0] ram_write_wait_cycle;
-    logic        cycle_accrate;
-    logic  [1:0] clk_select;
 
-
-    always @(posedge clk_chipset, posedge reset)
-    begin
-        if (reset)
-            clk_select  <= 2'b00;
-        else
-            clk_select  <= 2'b00;
-
-    end
+    wire [1:0] clk_select = 2'b00;
+    wire [7:0] clock_cycle_counter_division_ratio  = 8'd0;
+    wire [7:0] clock_cycle_counter_decrement_value = 8'd1;
+    wire       shift_read_timing                   = 1'b0;
+    wire [1:0] ram_read_wait_cycle                 = 2'd0;
+    wire [1:0] ram_write_wait_cycle                = 2'd0;
+    wire       cycle_accrate                       = 1'b1;
 
     logic  clk_cpu_ff_1;
     logic  clk_cpu_ff_2;
@@ -513,12 +476,6 @@ module emu
             pclk_ff_1       <= 1'b0;
             pclk_ff_2       <= 1'b0;
             pclk            <= 1'b0;
-            cycle_accrate   <= 1'b1;
-            clock_cycle_counter_division_ratio  <= 8'd1 - 8'd1;
-            clock_cycle_counter_decrement_value <= 8'd1;
-            shift_read_timing                   <= 1'b0;
-            ram_read_wait_cycle                 <= 2'd0;
-            ram_write_wait_cycle                <= 2'd0;
         end
         else
         begin
@@ -527,45 +484,7 @@ module emu
             pclk_ff_1       <= peripheral_clock;
             pclk_ff_2       <= pclk_ff_1;
             pclk            <= pclk_ff_2;
-            casez (clk_select)
-                2'b00: begin
-                    clk_cpu_ff_1    <= clk_4_77;
-                    clock_cycle_counter_division_ratio  <= 8'd1 - 8'd1;
-                    clock_cycle_counter_decrement_value <= 8'd1;
-                    shift_read_timing                   <= 1'b0;
-                    ram_read_wait_cycle                 <= 2'd0;
-                    ram_write_wait_cycle                <= 2'd0;
-                    cycle_accrate                       <= 1'b1;
-                end
-                2'b01: begin
-                    clk_cpu_ff_1    <= clk_7_16;
-                    clock_cycle_counter_division_ratio  <= 8'd2 - 8'd1;
-                    clock_cycle_counter_decrement_value <= 8'd3;
-                    shift_read_timing                   <= 1'b0;
-                    ram_read_wait_cycle                 <= 2'd0;
-                    ram_write_wait_cycle                <= 2'd0;
-                    cycle_accrate                       <= 1'b1;
-                end
-                2'b10: begin
-                    clk_cpu_ff_1    <= clk_9_54;
-                    clock_cycle_counter_division_ratio  <= 8'd10 - 8'd1;
-                    clock_cycle_counter_decrement_value <= 8'd21;
-                    shift_read_timing                   <= 1'b0;
-                    ram_read_wait_cycle                 <= 2'd0;
-                    ram_write_wait_cycle                <= 2'd0;
-                    cycle_accrate                       <= 1'b1;
-
-                end
-                2'b11: begin
-                    clk_cpu_ff_1    <= clk_25;
-                    clock_cycle_counter_division_ratio  <= 8'd1 - 8'd1;
-                    clock_cycle_counter_decrement_value <= 8'd5;
-                    shift_read_timing                   <= 1'b1;
-                    ram_read_wait_cycle                 <= 2'd1;
-                    ram_write_wait_cycle                <= 2'd0;
-                    cycle_accrate                       <= 1'b0;
-                end
-            endcase
+            clk_cpu_ff_1    <= clk_4_77;
         end
     end
 
@@ -1412,7 +1331,7 @@ module emu
 
     always @(posedge clk_chipset)
     begin
-        clk_uart_ff_1 <= clk_uart;
+        clk_uart_ff_1 <= clk_14_318;
         clk_uart_ff_2 <= clk_uart_ff_1;
         clk_uart_ff_3 <= clk_uart_ff_2;
         clk_uart_en   <= ~clk_uart_ff_3 & clk_uart_ff_2;
@@ -1500,8 +1419,8 @@ module emu
     wire [21:0] gamma_bus_cga;
     wire        CE_PIXEL_cga;
 
-    assign CLK_VIDEO = clk_56_875;
-    assign CLK_VIDEO_CGA = clk_56_875;
+    assign CLK_VIDEO = clk_28_636;
+    assign CLK_VIDEO_CGA = clk_28_636;
 
     assign VGA_SL = {scale_video_ff==3, scale_video_ff==2};
 
@@ -1552,9 +1471,9 @@ module emu
         end
     end
 
-    // Credits overlay expects a pixel enable synchronous to clk_56_875.
+    // Credits overlay expects a pixel enable synchronous to clk_28_636.
 
-    always @ (posedge clk_56_875) begin
+    always @ (posedge clk_28_636) begin
         video_pause_core_buf    <= pause_core;
         video_pause_core        <= video_pause_core_buf;
     end
@@ -1645,7 +1564,7 @@ module emu
         .BLKPOL (1)
     ) u_credits(
         .rst        ( reset      ),
-        .clk        ( clk_56_875 ),
+        .clk        ( clk_28_636 ),
         .pxl_cen    ( CE_PIXEL_CREDITS ),
 
         // input image
