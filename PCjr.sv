@@ -237,6 +237,9 @@ module emu
 		"P2-;",
 		"P2oEH,CRT H offset,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15;",
 		"P2oIK,CRT V offset,0,1,2,3,4,5,6,7;",
+		"P2oMO,VSync Width,Auto,1,2,3,4,5,6,7;",
+		"P2oPR,HSync Width,Auto,1,2,3,4,5,6,7;",
+        "P2-;",
 		"P2O12,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%;",
 		"P2O89,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 		"P2OT,Border,No,Yes;",
@@ -294,6 +297,8 @@ module emu
     wire [1:0] ar = status[9:8];
     wire border = status[29] | xtctl[1];
     wire a000h = 1'b0;
+    wire [2:0] vsync_width_osd = status[56:54];  // 0=Auto (use register), 1-7=override
+    wire [2:0] hsync_width_osd = status[59:57];  // 0=Auto, 1-7=fixed width (Nx16 pixel clocks)
     reg  [3:0] ram_size;  // Latched on reset; OSD changes take effect after next reset
 
     reg [1:0]   scale_video_ff;
@@ -1196,7 +1201,9 @@ module emu
 		.hercules_hw                        (hercules_hw_sel),
 		.swap_video                         (swap_video),
 		.crt_h_offset                       (status[49:46]),
-		.crt_v_offset                       (status[52:50])
+		.crt_v_offset                       (status[52:50]),
+		.vsync_width_osd                    (vsync_width_osd),
+		.hsync_width_osd                    (hsync_width_osd)
 	);
 
     wire [15:0] SDRAM_DQ_IN;
