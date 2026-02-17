@@ -83,6 +83,7 @@ reg  [9:0] pcjr_watchdog_count;
 reg [27:0] pcjr_watchdog_sum;
 reg        pcjr_watchdog_tick;
 reg        pcjr_irq;
+reg        pcjr_idle_rqm;
 
 wire pcjr_dor_write    = pcjr_mode && io_write && io_address == 3'h2;
 wire pcjr_watchdog_arm = pcjr_dor_write &&  pcjr_dor[6] && ~io_writedata[6];
@@ -144,11 +145,13 @@ wire [7:0] io_readdata_prepare_std =
                            8'd0;
 
 wire [7:0] io_readdata_prepare_pcjr =
-    (io_address == 3'd2) ? pcjr_dor :
+    (io_address == 3'd0) ? 8'hFF :
+    (io_address == 3'd1) ? 8'h30 :
+    (io_address == 3'd2) ? 8'hFF :
+    (io_address == 3'd3) ? 8'h20 :
     (io_address == 3'd4) ? pcjr_stat :
     (io_address == 3'd5) ? (pcjr_result_phase ? reply[7:0] : pcjr_data) :
-    (io_address == 3'd7) ? { change[selected_drive[0]], 7'h7F } :
-                           8'd0;
+                           8'hFF;
 
 wire [7:0] io_readdata_prepare = pcjr_mode ? io_readdata_prepare_pcjr : io_readdata_prepare_std;
 
@@ -829,7 +832,8 @@ assign pcjr_write_exec   = pcjr_mode && (cmd_write_normal_in_progress || cmd_for
 assign pcjr_stat = pcjr_result_phase ? 8'hD0 :
                    pcjr_read_exec    ? (pcjr_data_ready ? 8'hF0 : 8'h70) :
                    pcjr_write_exec   ? (pcjr_write_ready ? 8'hB0 : 8'h30) :
-                   pcjr_cmd_phase    ? 8'h90 : 8'h80;
+                   pcjr_cmd_phase    ? 8'h90 :
+                                       (pcjr_idle_rqm ? 8'h80 : 8'h00);
 
 reg [15:0] command_wait_counter;
 always @(posedge clk) begin
@@ -992,6 +996,17 @@ always @(posedge clk) begin
 		pcjr_write_stall <= 1'b1;
 	end else begin
 		pcjr_write_stall <= 1'b0;
+	end
+end
+
+always @(posedge clk) begin
+	if(~rst_n | sw_reset) begin
+		pcjr_idle_rqm <= 1'b1;
+	end else if(!pcjr_mode) begin
+		pcjr_idle_rqm <= 1'b1;
+	end else begin
+		if(io_write && io_address == 3'd5) pcjr_idle_rqm <= 1'b1;
+		else if(io_read && io_address == 3'd5 && ~pcjr_result_phase && ~pcjr_read_exec && ~pcjr_write_exec && ~pcjr_cmd_phase) pcjr_idle_rqm <= 1'b0;
 	end
 end
 

@@ -244,7 +244,7 @@ module PERIPHERALS #(
                                                            (pcjr_phys_page == pcjr_b8000_page)));
     wire    xtctl_chip_select       = (iorq && ~address_enable_n && address[15:0] == 16'h8888);
     wire    rtc_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h02C0 >> 1)); // 0x2C0 .. 0x2C1
-    wire    floppy0_chip_select_n   = ~(~address_enable_n && ({address[15:3], 3'd0} == 16'h00F0));
+    wire    floppy0_chip_select_n   = ~(~address_enable_n && ({address[15:3], 3'd0} == 16'h00F0) && (address[2:0] <= 3'd5));
 
     //
     // I/O Ports
