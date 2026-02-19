@@ -250,6 +250,7 @@ always @(posedge clk) begin
 	end else begin
 		if(pcjr_watchdog_arm) begin
 			pcjr_watchdog_count <= 10'd1000;
+			pcjr_irq            <= 1'b0;
 		end else if(pcjr_watchdog_tick && pcjr_watchdog_count != 0) begin
 			pcjr_watchdog_count <= pcjr_watchdog_count - 1'd1;
 			if(pcjr_watchdog_count == 10'd1 && pcjr_dor[5]) pcjr_irq <= 1'b1;
@@ -444,20 +445,22 @@ wire cmd_read_id_in_progress      = pending_command[4:0] == 5'h0A;
 
 wire enter_result_phase =
 	cmd_invalid_start || cmd_sense_interrupt_status_start || cmd_dump_registers_start || cmd_version_start || cmd_unlock_start || cmd_lock_start ||
-	(cmd_read_write_start && (cmd_read_write_incorrect_head_at_start || cmd_read_write_incorrect_sector_at_start || cmd_write_and_writeprotected_at_start)) ||
+	(cmd_read_write_start && (cmd_read_write_abort_at_start || cmd_read_write_incorrect_head_at_start || cmd_read_write_incorrect_sector_at_start || cmd_write_and_writeprotected_at_start)) ||
 	(state == S_CHECK_TC && (cmd_read_write_finish || cmd_format_finish)) ||
-	(cmd_format_track_start && cmd_format_writeprotected_at_start) ||
+	(cmd_format_track_start && (cmd_format_writeprotected_at_start || cmd_format_abort_at_start)) ||
 	(state == S_WAIT_FOR_FORMAT_INPUT && cmd_format_in_input_finish) ||
 	cmd_get_status_start ||
+	cmd_read_id_abort_at_start ||
 	cmd_read_id_finished;
 
 wire raise_interrupt_base = (
-	(cmd_read_write_start && (cmd_read_write_incorrect_head_at_start || cmd_read_write_incorrect_sector_at_start)) ||
+	(cmd_read_write_start && (cmd_read_write_abort_at_start || cmd_read_write_incorrect_head_at_start || cmd_read_write_incorrect_sector_at_start)) ||
 	(cmd_write_normal_start && cmd_write_and_writeprotected_at_start) ||
 	(state == S_CHECK_TC && (cmd_read_write_finish || cmd_format_finish)) ||
-	(cmd_format_track_start && cmd_format_writeprotected_at_start) ||
+	(cmd_format_track_start && (cmd_format_writeprotected_at_start || cmd_format_abort_at_start)) ||
 	(state == S_WAIT_FOR_FORMAT_INPUT && cmd_format_in_input_finish) ||
 	delay_last_cycle ||
+	cmd_read_id_abort_at_start ||
 	cmd_read_id_finished
 );
 
@@ -485,6 +488,9 @@ wire cmd_write_and_writeprotected_at_start    = ~cmd_read_write_hang_at_start &&
     
 wire cmd_read_write_ok_at_start = 
 	cmd_read_write_start && ~cmd_read_write_hang_at_start && ~cmd_read_write_incorrect_head_at_start && ~cmd_read_write_incorrect_sector_at_start && ~cmd_write_and_writeprotected_at_start;
+
+wire cmd_read_write_abort_at_start =
+	cmd_read_write_start && cmd_read_write_hang_at_start;
     
 reg cmd_read_write_multitrack;
 always @(posedge clk) begin
@@ -512,6 +518,7 @@ wire cmd_read_id_hang_at_start =
 
 wire cmd_read_id_ok_at_start = cmd_read_id_start && ~cmd_read_id_hang_at_start;
 wire cmd_read_id_finished = state == S_WAIT && !command_wait_counter && cmd_read_id_in_progress;
+wire cmd_read_id_abort_at_start = cmd_read_id_start && cmd_read_id_hang_at_start;
 
 //------------------------------------------------------------------------------ cmd: specify
     
@@ -669,6 +676,7 @@ wire cmd_format_hang_on_start =
 	command[15:8] != media_sectors_per_track[selected_drive[0]]; //invalid secotr count
 
 wire cmd_format_ok_at_start = cmd_format_track_start && ~cmd_format_writeprotected_at_start && ~cmd_format_hang_on_start;
+wire cmd_format_abort_at_start = cmd_format_track_start && cmd_format_hang_on_start;
 
 reg [31:0] format_data;
 always @(posedge clk) begin
@@ -711,12 +719,15 @@ reg [3:0] reply_left;
 always @(posedge clk) begin
 	if(~rst_n | sw_reset)                                                        reply_left <= 4'd0;
 	else if(cmd_invalid_start)                                                   reply_left <= 4'd1;
+	else if(cmd_read_write_abort_at_start)                                       reply_left <= 4'd7;
 	else if(cmd_read_write_start   && cmd_read_write_incorrect_head_at_start)    reply_left <= 4'd7;
 	else if(cmd_read_write_start   && cmd_read_write_incorrect_sector_at_start)  reply_left <= 4'd7;
 	else if(cmd_write_normal_start && cmd_write_and_writeprotected_at_start)     reply_left <= 4'd7;
+	else if(cmd_format_abort_at_start)                                           reply_left <= 4'd7;
 	else if(cmd_format_track_start && cmd_format_writeprotected_at_start)        reply_left <= 4'd7;
 	else if(state == S_CHECK_TC && (cmd_read_write_finish || cmd_format_finish)) reply_left <= 4'd7;
 	else if(state == S_WAIT_FOR_FORMAT_INPUT && cmd_format_in_input_finish)      reply_left <= 4'd7;
+	else if(cmd_read_id_abort_at_start)                                          reply_left <= 4'd7;
 	else if(cmd_read_id_finished)                                                reply_left <= 4'd7;
 	else if(cmd_get_status_start)                                                reply_left <= 4'd1;
 	else if(cmd_sense_interrupt_status_start)                                    reply_left <= 4'd2;
@@ -732,13 +743,16 @@ always @(posedge clk) begin
 	else if(cmd_invalid_start)                                                reply <= { reply[79:8], 8'h80 };
 	else if(delay_last_cycle && cmd_recalibrate_in_progress)                  reply <= { reply[79:8], 8'h20 | { 6'd0, selected_drive } | ((~motor_enable[selected_drive[0]])? 8'h50 : 8'h00) };
 	else if(delay_last_cycle)                                                 reply <= { reply[79:8], 8'h20 | { 5'd0, head[selected_drive[0]], selected_drive } }; 
+	else if(cmd_read_write_abort_at_start)                                    reply <= { 24'd0, 8'd2, command[31:24],            7'b0,command[32],             command[47:40],              8'h00, 8'h04, (8'h40 | { 5'd0, command[32],              selected_drive }) };
 	else if(cmd_read_write_start && cmd_read_write_incorrect_head_at_start)   reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,head[selected_drive[0]], cylinder[selected_drive[0]], 8'h00, 8'h04, (8'h40 | { 5'd0, head[selected_drive[0]],  selected_drive }) };
 	else if(cmd_read_write_start && cmd_read_write_incorrect_sector_at_start) reply <= { 24'd0, 8'd2, command[31:24],            7'b0,command[32],             command[47:40],              8'h00, 8'h04, (8'h40 | { 5'd0, command[32],              selected_drive }) };
 	else if(cmd_write_normal_start && cmd_write_and_writeprotected_at_start)  reply <= { 24'd0, 8'd2, command[31:24],            7'b0,command[32],             command[47:40],              8'h31, 8'h27, (8'h40 | { 5'd0, command[32],              selected_drive }) };
+	else if(cmd_format_abort_at_start)                                        reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,command[26],             cylinder[selected_drive[0]], 8'h00, 8'h04, (8'h40 | { 5'd0, command[26],              selected_drive }) };
 	else if(cmd_format_track_start && cmd_format_writeprotected_at_start)     reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,command[26],             cylinder[selected_drive[0]], 8'h31, 8'h27, (8'h40 | { 5'd0, command[26],              selected_drive }) };
 	else if(state == S_CHECK_TC && cmd_read_write_finish)                     reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,head[selected_drive[0]], cylinder[selected_drive[0]], 8'h00, 8'h00, (8'h00 | { 5'd0, head[selected_drive[0]],  selected_drive }) };
 	else if(state == S_CHECK_TC && cmd_format_finish)                         reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,head[selected_drive[0]], cylinder[selected_drive[0]], 8'h00, 8'h00, (8'h00 | { 5'd0, head[selected_drive[0]],  selected_drive }) };
 	else if(state == S_WAIT_FOR_FORMAT_INPUT && cmd_format_in_input_finish)   reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,head[selected_drive[0]], cylinder[selected_drive[0]], 8'h00, 8'h00, (8'h40 | { 5'd0, head[selected_drive[0]],  selected_drive }) };
+	else if(cmd_read_id_abort_at_start)                                       reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,head[selected_drive[0]], cylinder[selected_drive[0]], 8'h00, 8'h04, (8'h40 | { 5'd0, head[selected_drive[0]],  selected_drive }) };
 	else if(cmd_read_id_finished)                                             reply <= { 24'd0, 8'd2, sector[selected_drive[0]], 7'b0,head[selected_drive[0]], cylinder[selected_drive[0]], 8'h00, 8'h00, (8'h00 | { 5'd0, head[selected_drive[0]],  selected_drive }) };
 	else if(cmd_get_status_start)                                             reply <= { 72'd0, 1'b0, media_writeprotected[io_writedata[0]], 1'b1, !cylinder[io_writedata[0]], 1'b1, io_writedata[2], 1'b0, io_writedata[0] };
 	else if(cmd_sense_interrupt_status_start && reset_sensei)                 reply <= { 64'd0, cylinder[selected_drive[0]], 4'hC, 2'b00, reset_sensei_drive };
@@ -907,7 +921,7 @@ end
 (* ramstyle = "logic" *) reg [7:0] eot[2];
 always @(posedge clk) begin
 	if(~rst_n | sw_reset)                begin eot[0] <= 8'd0; eot[1] <= 8'd0; end
-	else if(cmd_read_write_ok_at_start)  eot[selected_drive[0]] <= (command[15:8] == 8'd0)? media_sectors_per_track[selected_drive[0]] : command[15:8];
+	else if(cmd_read_write_ok_at_start)  eot[selected_drive[0]] <= pcjr_mode ? command[15:8] : ((command[15:8] == 8'd0)? media_sectors_per_track[selected_drive[0]] : command[15:8]);
 end
 
 //------------------------------------------------------------------------------ sd
