@@ -386,15 +386,20 @@ module PERIPHERALS #(
     logic           pcjr_kbd_data;
     wire            pcjr_keybd_in = ~pcjr_kbd_data;
     wire            pcjr_cable_connected_n = 1'b0;
+    // PCjr port 62h bit4 is selected by PB3:
+    // PB3=1 -> speaker/PIT status, PB3=0 -> cassette/input path.
+    wire            pcjr_port62_bit4 = port_b_out[3] ? timer_counter_out[2] : port_c_in[4];
     wire    [7:0]   pcjr_port_c_in = {
         pcjr_cable_connected_n,
         pcjr_keybd_in,
         timer_counter_out[2],
-        timer_counter_out[2],
+        pcjr_port62_bit4,
         port_c_in[3:1],
         keybd_latch
     };
     wire    [7:0]   port_c_in_mux = pcjr_port_c_in;
+    // PCjr status reads at 0x62 should expose live status bits.
+    wire    [7:0]   ppi_data_bus_out_mux = (tandy_video_en && address[1:0] == 2'b10) ? pcjr_port_c_in : ppi_data_bus_out;
 
     KF8255 u_KF8255 
     (
@@ -1537,7 +1542,7 @@ end
         else if ((~ppi_chip_select_n) && (~io_read_n))
         begin
             data_bus_out_from_chipset <= 1'b1;
-            data_bus_out <= ppi_data_bus_out;
+            data_bus_out <= ppi_data_bus_out_mux;
         end
         else if ((cga_mem_select || video_mem_select) && (~memory_read_n))
         begin
