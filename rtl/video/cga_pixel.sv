@@ -232,7 +232,8 @@ module cga_pixel(
         .grph_mode(grph_mode),
         .bw_mode(bw_mode),
         .mode_640(mode_640),
-        .tandy_16_mode(tandy_16_mode && hres_mode),
+        // PCjr uses gate-array palette/border semantics in low-res modes too (e.g. 320x200x4).
+        .tandy_16_mode((tandy_16_mode && hres_mode) || pcjr_video),
         .display_enable(display_enable_del[0]),
         .blink_enabled(blink_enabled),
         .blink(blink),
