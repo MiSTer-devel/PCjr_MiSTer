@@ -444,6 +444,7 @@ wire cmd_read_write_start = cmd_read_normal_start || cmd_write_normal_start;
 
 wire cmd_read_normal_in_progress  = pending_command[4:0] == 5'h06;
 wire cmd_write_normal_in_progress = pending_command[4:0] == 5'h05;
+wire cmd_read_write_in_progress   = cmd_read_normal_in_progress || cmd_write_normal_in_progress;
 wire cmd_format_in_progress       = pending_command[4:0] == 5'h0D;
 wire cmd_recalibrate_in_progress  = pending_command[4:0] == 5'h07;
 wire cmd_read_id_in_progress      = pending_command[4:0] == 5'h0A;
@@ -503,15 +504,35 @@ always @(posedge clk) begin
     else if(cmd_read_write_ok_at_start) cmd_read_write_multitrack <= command[63];
 end
 
+wire [7:0] pcjr_ndma_sector_count = (command[15:8] >= command[31:24]) ? (command[15:8] - command[31:24] + 8'd1) : 8'd1;
+reg  [7:0] pcjr_ndma_sectors_left;
+always @(posedge clk) begin
+	if(~rst_n)                                                                                 pcjr_ndma_sectors_left <= 8'd0;
+	else if(pcjr_mode && cmd_read_write_ok_at_start)                                           pcjr_ndma_sectors_left <= pcjr_ndma_sector_count;
+	else if(pcjr_mode && state == S_UPDATE_SECTOR && execute_ndma && cmd_read_write_in_progress && pcjr_ndma_sectors_left != 8'd0) pcjr_ndma_sectors_left <= pcjr_ndma_sectors_left - 8'd1;
+end
+
 wire cmd_read_write_finish =
 	(cmd_read_normal_in_progress || cmd_write_normal_in_progress) &&
 	((~execute_ndma && dma_has_terminated) || (execute_ndma && cmd_read_write_was_ndma_terminal));
 
+wire cmd_read_write_ndma_terminal_std =
+	state == S_UPDATE_SECTOR &&
+	~pcjr_mode &&
+	sector[selected_drive[0]] == eot[selected_drive[0]] &&
+	(!cmd_read_write_multitrack || ({1'b0, head[selected_drive[0]] } == (media_heads[selected_drive[0]] - 2'd1)));
+
+wire cmd_read_write_ndma_terminal_pcjr =
+	state == S_UPDATE_SECTOR &&
+	pcjr_mode &&
+	execute_ndma &&
+	cmd_read_write_in_progress &&
+	pcjr_ndma_sectors_left == 8'd1;
+
 reg cmd_read_write_was_ndma_terminal;
 always @(posedge clk) begin
     if(~rst_n)                                                                                 cmd_read_write_was_ndma_terminal <= 1'd0;
-    else if(state == S_UPDATE_SECTOR && sector[selected_drive[0]] == eot[selected_drive[0]] && 
-	        (!cmd_read_write_multitrack || ({1'b0, head[selected_drive[0]] } == (media_heads[selected_drive[0]] - 2'd1)))) cmd_read_write_was_ndma_terminal <= 1'd1;
+    else if(cmd_read_write_ndma_terminal_std || cmd_read_write_ndma_terminal_pcjr)            cmd_read_write_was_ndma_terminal <= 1'd1;
     else if(state == S_UPDATE_SECTOR)                                                          cmd_read_write_was_ndma_terminal <= 1'd0;
 end
 
