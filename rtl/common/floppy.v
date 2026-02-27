@@ -144,9 +144,14 @@ wire [7:0] io_readdata_prepare_std =
     (io_address == 3'd7) ? { change[selected_drive[0]], 7'h7F } :
                            8'd0;
 
+wire [7:0] pcjr_0f1_status =
+	((pcjr_dor[0] ? 8'h30 : 8'h50) |
+	 (pcjr_dor[4] ? 8'h01 : 8'h00) |
+	 (pcjr_dor[5] ? 8'h02 : 8'h00));
+
 wire [7:0] io_readdata_prepare_pcjr =
     (io_address == 3'd0) ? 8'hFF :
-    (io_address == 3'd1) ? 8'h30 :
+    (io_address == 3'd1) ? pcjr_0f1_status :
     (io_address == 3'd2) ? 8'hFF :
     (io_address == 3'd3) ? 8'h20 :
     (io_address == 3'd4) ? pcjr_stat :
