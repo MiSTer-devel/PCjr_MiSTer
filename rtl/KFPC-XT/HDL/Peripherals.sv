@@ -246,6 +246,18 @@ module PERIPHERALS #(
     wire    rtc_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h02C0 >> 1)); // 0x2C0 .. 0x2C1
     wire    floppy0_chip_select_n   = ~(~address_enable_n && ({address[15:3], 3'd0} == 16'h00F0) && (address[2:0] <= 3'd5));
 
+    // Sync memctrl (3DFh) into VGA clock domain and apply at VBlank edge
+    // so page changes are frame-coherent for scanout.
+    logic   [7:0]   tandy_page_data_vga_1 = 8'h00;
+    logic   [7:0]   tandy_page_data_vga_2 = 8'h00;
+    logic   [7:0]   tandy_page_data_scan_vga = 8'h00;
+    logic   [7:0]   tandy_page_data_pending_vga = 8'h00;
+    logic           tandy_page_pending_valid_vga = 1'b0;
+    logic           prev_vblank_cga = 1'b0;
+    wire            pcjr_memctrl_32k_vga = (tandy_page_data_scan_vga[7:6] == 2'b11);
+    wire    [1:0]   pcjr_addr_mode_vga   = tandy_page_data_scan_vga[7:6];
+    wire    [2:0]   pcjr_vram_page_vga   = pcjr_memctrl_32k_vga ? {1'b0, tandy_page_data_scan_vga[2:1]} : tandy_page_data_scan_vga[2:0];
+
     //
     // I/O Ports
     //
@@ -842,6 +854,8 @@ end
     logic prev_io_write_n;
     logic [7:0] write_to_uart;
     logic [7:0] write_to_uart2;
+    logic [7:0] write_to_tandy_page;
+    logic       tandy_page_write_cycle;
     logic [7:0] uart_readdata_1;
     logic [7:0] uart_readdata;
     logic [7:0] uart2_readdata_1;
@@ -897,17 +911,21 @@ end
             tandy_page_data <= 8'h00;
             pcjr_page_map_enabled <= 1'b0;
             nmi_mask_register_data <= 8'hFF;
+            write_to_tandy_page <= 8'h00;
+            tandy_page_write_cycle <= 1'b0;
         end
         else begin
             if (~io_write_n)
             begin
                 write_to_uart <= internal_data_bus;
                 write_to_uart2 <= internal_data_bus;
+                write_to_tandy_page <= internal_data_bus;
             end
             else
             begin
                 write_to_uart <= write_to_uart;
                 write_to_uart2 <= write_to_uart2;
+                write_to_tandy_page <= write_to_tandy_page;
             end
 
             if ((lpt_chip_select) && (~io_write_n) && ~address[0])
@@ -922,9 +940,18 @@ end
             if ((xtctl_chip_select) && (~io_write_n))
                 xtctl <= internal_data_bus;
 
-            if (tandy_page_chip_select && (~io_write_n))
+            // Latch 0x3DF target at write start and commit on write end, using
+            // data captured while io_write_n was asserted low.
+            if ((~io_write_n) && prev_io_write_n)
+                tandy_page_write_cycle <= tandy_page_chip_select;
+            else if (io_write_n && ~prev_io_write_n)
+                tandy_page_write_cycle <= 1'b0;
+            else
+                tandy_page_write_cycle <= tandy_page_write_cycle;
+
+            if (io_write_n && ~prev_io_write_n && tandy_page_write_cycle)
             begin
-                tandy_page_data <= internal_data_bus;
+                tandy_page_data <= write_to_tandy_page;
                 pcjr_page_map_enabled <= 1'b1;
             end
 
@@ -1131,18 +1158,53 @@ end
         end
     end
 
-    always_ff @(posedge clk_vga_cga)
+    always_ff @(posedge clk_vga_cga, posedge reset)
     begin
-        cga_io_address_1        <= video_io_address;
-        cga_io_address_2        <= cga_io_address_1;
-        cga_io_data_1           <= video_io_data;
-        cga_io_data_2           <= cga_io_data_1;
-        cga_io_write_n_1        <= video_io_write_n;
-        cga_io_write_n_2        <= cga_io_write_n_1;
-        cga_io_read_n_1         <= video_io_read_n;
-        cga_io_read_n_2         <= cga_io_read_n_1;
-        cga_address_enable_n_1  <= video_address_enable_n;
-        cga_address_enable_n_2  <= cga_address_enable_n_1;
+        if (reset) begin
+            tandy_page_data_vga_1 <= 8'h00;
+            tandy_page_data_vga_2 <= 8'h00;
+            tandy_page_data_scan_vga <= 8'h00;
+            tandy_page_data_pending_vga <= 8'h00;
+            tandy_page_pending_valid_vga <= 1'b0;
+            prev_vblank_cga <= 1'b0;
+            cga_io_address_1 <= 15'h0000;
+            cga_io_address_2 <= 15'h0000;
+            cga_io_data_1 <= 8'h00;
+            cga_io_data_2 <= 8'h00;
+            cga_io_write_n_1 <= 1'b1;
+            cga_io_write_n_2 <= 1'b1;
+            cga_io_read_n_1 <= 1'b1;
+            cga_io_read_n_2 <= 1'b1;
+            cga_address_enable_n_1 <= 1'b1;
+            cga_address_enable_n_2 <= 1'b1;
+        end else begin
+            tandy_page_data_vga_1 <= tandy_page_data;
+            tandy_page_data_vga_2 <= tandy_page_data_vga_1;
+
+            // Track latest CPU-side memctrl value to be committed on VBlank edge.
+            if (tandy_page_data_vga_2 != tandy_page_data_pending_vga) begin
+                tandy_page_data_pending_vga <= tandy_page_data_vga_2;
+                tandy_page_pending_valid_vga <= 1'b1;
+            end
+
+            // Apply page/mode changes only at the start of vertical blank.
+            if ((~prev_vblank_cga) && VBLANK_CGA && tandy_page_pending_valid_vga) begin
+                tandy_page_data_scan_vga <= tandy_page_data_pending_vga;
+                tandy_page_pending_valid_vga <= 1'b0;
+            end
+            prev_vblank_cga <= VBLANK_CGA;
+
+            cga_io_address_1        <= video_io_address;
+            cga_io_address_2        <= cga_io_address_1;
+            cga_io_data_1           <= video_io_data;
+            cga_io_data_2           <= cga_io_data_1;
+            cga_io_write_n_1        <= video_io_write_n;
+            cga_io_write_n_2        <= cga_io_write_n_1;
+            cga_io_read_n_1         <= video_io_read_n;
+            cga_io_read_n_2         <= cga_io_read_n_1;
+            cga_address_enable_n_1  <= video_address_enable_n;
+            cga_address_enable_n_2  <= cga_address_enable_n_1;
+        end
     end
 
 
@@ -1256,7 +1318,7 @@ end
         .splashscreen               (splashscreen),
         .thin_font                  (thin_font),
         .tandy_video                (tandy_video_en),
-        .pcjr_addr_mode             (pcjr_addr_mode),
+        .pcjr_addr_mode             (pcjr_addr_mode_vga),
         .grph_mode                  (grph_mode),
         .hres_mode                  (hres_mode),
         .tandy_color_16             (tandy_color_16_raw),
@@ -1292,8 +1354,8 @@ end
                                  (pcjr_memctrl_32k ? {pcjr_b8000_page[1:0], video_ram_address[14:0]} :
                                  {pcjr_b8000_page, video_ram_address[13:0]})) : {3'b000, video_ram_address[13:0]});
     wire [16:0] cga_vram_addrb = tandy_video_en ?
-                                 (pcjr_memctrl_32k ? {pcjr_vram_page[1:0], CGA_VRAM_ADDR[14:0]} :
-                                 {pcjr_vram_page, CGA_VRAM_ADDR[13:0]}) : {3'b000, CGA_VRAM_ADDR[13:0]};
+                                 (pcjr_memctrl_32k_vga ? {pcjr_vram_page_vga[1:0], CGA_VRAM_ADDR[14:0]} :
+                                 {pcjr_vram_page_vga, CGA_VRAM_ADDR[13:0]}) : {3'b000, CGA_VRAM_ADDR[13:0]};
     wire [7:0]  cga_vram_dina  = cga_vram_copy ? cga_copy_data : video_ram_data;
     wire        cga_vram_ena   = cga_vram_copy ? 1'b1 : (cga_mem_select_1 || video_mem_select_1);
     wire        cga_vram_wea   = cga_vram_copy ? 1'b1 : (~video_memory_write_n & memory_write_n);
