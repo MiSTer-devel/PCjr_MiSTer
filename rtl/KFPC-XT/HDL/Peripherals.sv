@@ -236,7 +236,7 @@ module PERIPHERALS #(
     wire    [2:0] pcjr_b8000_page   = pcjr_memctrl_32k ? {1'b0, tandy_page_data[5:4]} : tandy_page_data[5:3];
     wire    [2:0] pcjr_vram_page    = pcjr_memctrl_32k ? {1'b0, tandy_page_data[2:1]} : tandy_page_data[2:0];
     wire    [2:0] pcjr_phys_page    = pcjr_memctrl_32k ? {1'b0, address[16:15]} : address[16:14];
-    wire    video_mem_select        = tandy_video_en && ~iorq && ~address_enable_n &&
+    wire    video_mem_select        = tandy_video_en && pcjr_page_map_enabled && ~iorq && ~address_enable_n &&
                                       (address[19:17] == 3'b000) &&
                                       (pcjr_memctrl_32k ? ((pcjr_phys_page[1:0] == pcjr_vram_page[1:0]) ||
                                                            (pcjr_phys_page[1:0] == pcjr_b8000_page[1:0])) :
@@ -887,6 +887,7 @@ end
 	 reg [7:0] lpt_ctrl = 8'h00;
 	 reg [7:0] lpt_enable_irq = 8'h00;
     reg [7:0] tandy_page_data = 8'h00;
+    reg       pcjr_page_map_enabled = 1'b0;
     reg [7:0] nmi_mask_register_data = 8'hFF;
     always_ff @(posedge clock, posedge reset)
     begin
@@ -894,6 +895,7 @@ end
         begin
             xtctl <= 8'b00;
             tandy_page_data <= 8'h00;
+            pcjr_page_map_enabled <= 1'b0;
             nmi_mask_register_data <= 8'hFF;
         end
         else begin
@@ -921,7 +923,10 @@ end
                 xtctl <= internal_data_bus;
 
             if (tandy_page_chip_select && (~io_write_n))
+            begin
                 tandy_page_data <= internal_data_bus;
+                pcjr_page_map_enabled <= 1'b1;
+            end
 
             if (write_nmi_mask)
                 nmi_mask_register_data <= internal_data_bus;
@@ -1320,6 +1325,7 @@ end
     logic           fdd_io_read;
     logic           fdd_io_read_1;
     logic           fdd_io_write;
+    logic           fdd_write_cycle_to_fdd;
     logic   [7:0]   fdd_readdata_wire;
     logic   [7:0]   fdd_dma_readdata;
     logic   [7:0]   fdd_readdata;
@@ -1345,12 +1351,32 @@ end
             write_to_fdd  <= write_to_fdd;
     end
 
-    always_ff @(posedge clock)
+    always_ff @(posedge clock, posedge reset)
     begin
-        fdd_io_address     <= address[2:0];
-        fdd_io_read        <= ~io_read_n & prev_io_read_n   & ~floppy0_chip_select_n;
-        fdd_io_read_1      <= fdd_io_read;
-        fdd_io_write       <= io_write_n & ~prev_io_write_n & ~floppy0_chip_select_n;
+        if (reset)
+        begin
+            fdd_io_address          <= 3'b000;
+            fdd_io_read             <= 1'b0;
+            fdd_io_read_1           <= 1'b0;
+            fdd_io_write            <= 1'b0;
+            fdd_write_cycle_to_fdd  <= 1'b0;
+        end
+        else
+        begin
+            fdd_io_address <= address[2:0];
+
+            // Latch target select at write start and use it at write end.
+            if ((~io_write_n) && prev_io_write_n)
+                fdd_write_cycle_to_fdd <= ~floppy0_chip_select_n;
+            else if (io_write_n && ~prev_io_write_n)
+                fdd_write_cycle_to_fdd <= 1'b0;
+            else
+                fdd_write_cycle_to_fdd <= fdd_write_cycle_to_fdd;
+
+            fdd_io_read        <= ~io_read_n & prev_io_read_n & ~floppy0_chip_select_n;
+            fdd_io_read_1      <= fdd_io_read;
+            fdd_io_write       <= io_write_n & ~prev_io_write_n & fdd_write_cycle_to_fdd;
+        end
     end
 
     assign  fdd_dma_read    = fdd_dma_ack & ~io_read_n;
@@ -1544,7 +1570,9 @@ end
             data_bus_out_from_chipset <= 1'b1;
             data_bus_out <= ppi_data_bus_out_mux;
         end
-        else if ((cga_mem_select || video_mem_select) && (~memory_read_n))
+        // PCjr shared RAM lives in conventional memory; low-memory CPU reads
+        // must come from system RAM. Only the B8000 window is remapped here.
+        else if (cga_mem_select && (~memory_read_n))
         begin
             data_bus_out_from_chipset <= 1'b1;
             data_bus_out <= cga_vram_cpu_dout;
