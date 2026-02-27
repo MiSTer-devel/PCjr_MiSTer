@@ -959,9 +959,16 @@ always @(posedge clk) begin
 end
 
 reg [15:0] sd_sector;
+wire [15:0] media_track_sector_count = {8'd0, media_cylinders[selected_drive[0]]} * {8'd0, media_sectors_per_track[selected_drive[0]]};
+wire [15:0] media_sector_count_geo =
+	(media_heads[selected_drive[0]] == 2'd2) ? {media_track_sector_count[14:0], 1'b0} :
+	(media_heads[selected_drive[0]] == 2'd1) ? media_track_sector_count :
+	16'd0;
+wire [15:0] media_sector_count_limit = (!pcjr_mode) ? media_sector_count[selected_drive[0]] :
+	((media_sector_count[selected_drive[0]] < media_sector_count_geo) ? media_sector_count_geo : media_sector_count[selected_drive[0]]);
 always @(posedge clk) begin
 	if(~rst_n)                  sd_sector <= 16'd0;
-	else if(state == S_PREPARE) sd_sector <= (logical_sector >= media_sector_count[selected_drive[0]])? media_sector_count[selected_drive[0]] - 1'd1 : logical_sector;
+	else if(state == S_PREPARE) sd_sector <= (media_sector_count_limit != 16'd0 && logical_sector >= media_sector_count_limit)? media_sector_count_limit - 1'd1 : logical_sector;
 end
 
 //------------------------------------------------------------------------------ dma
