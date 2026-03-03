@@ -233,30 +233,31 @@ module PERIPHERALS #(
     wire    tandy_page_chip_select  = tandy_video_en && iorq && ~address_enable_n && address[15:0] == 16'h03DF;
     wire    pcjr_memctrl_32k        = (tandy_page_data[7:6] == 2'b11);
     wire    [1:0] pcjr_addr_mode    = tandy_page_data[7:6];
-    wire    [2:0] pcjr_b8000_page   = pcjr_memctrl_32k ? {1'b0, tandy_page_data[5:4]} : tandy_page_data[5:3];
-    wire    [2:0] pcjr_vram_page    = pcjr_memctrl_32k ? {1'b0, tandy_page_data[2:1]} : tandy_page_data[2:0];
-    wire    [2:0] pcjr_phys_page    = pcjr_memctrl_32k ? {1'b0, address[16:15]} : address[16:14];
+    // In 32K mode, VRAM selects a 32K block (bits[2:1]); B800 selects a 32K block
+    // but still exposes a 16K window (low half), matching PCjr/PCem behavior.
+    wire    [2:0] pcjr_b8000_page   = pcjr_memctrl_32k ? {tandy_page_data[5:4], 1'b0} : tandy_page_data[5:3];
+    wire    [2:0] pcjr_vram_page    = pcjr_memctrl_32k ? {tandy_page_data[2:1], 1'b0} : tandy_page_data[2:0];
+    wire    [2:0] pcjr_phys_page    = address[16:14];
     wire    video_mem_select        = tandy_video_en && pcjr_page_map_enabled && ~iorq && ~address_enable_n &&
                                       (address[19:17] == 3'b000) &&
-                                      (pcjr_memctrl_32k ? ((pcjr_phys_page[1:0] == pcjr_vram_page[1:0]) ||
-                                                           (pcjr_phys_page[1:0] == pcjr_b8000_page[1:0])) :
+                                      (pcjr_memctrl_32k ? ((address[16:15] == pcjr_vram_page[2:1]) ||
+                                                           (pcjr_phys_page == pcjr_b8000_page)) :
                                                           ((pcjr_phys_page == pcjr_vram_page) ||
                                                            (pcjr_phys_page == pcjr_b8000_page)));
     wire    xtctl_chip_select       = (iorq && ~address_enable_n && address[15:0] == 16'h8888);
     wire    rtc_chip_select         = (iorq && ~address_enable_n && address[15:1] == (16'h02C0 >> 1)); // 0x2C0 .. 0x2C1
     wire    floppy0_chip_select_n   = ~(~address_enable_n && ({address[15:3], 3'd0} == 16'h00F0) && (address[2:0] <= 3'd5));
 
-    // Sync memctrl (3DFh) into VGA clock domain and apply at VBlank edge
-    // so page changes are frame-coherent for scanout.
+    // Sync memctrl (3DFh) into VGA clock domain for scanout/page decode.
+    // Apply immediately after CDC (PCem-style behavior), without waiting for VBlank.
     logic   [7:0]   tandy_page_data_vga_1 = 8'h00;
     logic   [7:0]   tandy_page_data_vga_2 = 8'h00;
     logic   [7:0]   tandy_page_data_scan_vga = 8'h00;
     logic   [7:0]   tandy_page_data_pending_vga = 8'h00;
     logic           tandy_page_pending_valid_vga = 1'b0;
-    logic           prev_vblank_cga = 1'b0;
     wire            pcjr_memctrl_32k_vga = (tandy_page_data_scan_vga[7:6] == 2'b11);
     wire    [1:0]   pcjr_addr_mode_vga   = tandy_page_data_scan_vga[7:6];
-    wire    [2:0]   pcjr_vram_page_vga   = pcjr_memctrl_32k_vga ? {1'b0, tandy_page_data_scan_vga[2:1]} : tandy_page_data_scan_vga[2:0];
+    wire    [2:0]   pcjr_vram_page_vga   = pcjr_memctrl_32k_vga ? {tandy_page_data_scan_vga[2:1], 1'b0} : tandy_page_data_scan_vga[2:0];
 
     //
     // I/O Ports
@@ -1044,6 +1045,7 @@ end
     logic          video_memory_write_n;
     logic          cga_mem_select_1;
     logic          video_mem_select_1;
+    logic          video_mem_write_select_1 = 1'b0;
     logic  [14:0]  video_io_address;
     logic  [7:0]   video_io_data;
     logic          video_io_write_n;
@@ -1097,6 +1099,10 @@ end
         video_memory_write_n    <= memory_write_n;
         cga_mem_select_1        <= cga_mem_select;
         video_mem_select_1      <= video_mem_select;
+        // Mirror writes across the whole low 128K shared RAM window.
+        // Keep read redirection narrow (video_mem_select_1) to avoid fetch regressions.
+        video_mem_write_select_1 <= tandy_video_en && pcjr_page_map_enabled && ~iorq && ~address_enable_n &&
+                                    ~memory_write_n && (address[19:17] == 3'b000);
 
         video_io_write_n        <= io_write_n;
         video_io_read_n         <= io_read_n;
@@ -1166,7 +1172,6 @@ end
             tandy_page_data_scan_vga <= 8'h00;
             tandy_page_data_pending_vga <= 8'h00;
             tandy_page_pending_valid_vga <= 1'b0;
-            prev_vblank_cga <= 1'b0;
             cga_io_address_1 <= 15'h0000;
             cga_io_address_2 <= 15'h0000;
             cga_io_data_1 <= 8'h00;
@@ -1181,18 +1186,10 @@ end
             tandy_page_data_vga_1 <= tandy_page_data;
             tandy_page_data_vga_2 <= tandy_page_data_vga_1;
 
-            // Track latest CPU-side memctrl value to be committed on VBlank edge.
-            if (tandy_page_data_vga_2 != tandy_page_data_pending_vga) begin
-                tandy_page_data_pending_vga <= tandy_page_data_vga_2;
-                tandy_page_pending_valid_vga <= 1'b1;
-            end
-
-            // Apply page/mode changes only at the start of vertical blank.
-            if ((~prev_vblank_cga) && VBLANK_CGA && tandy_page_pending_valid_vga) begin
-                tandy_page_data_scan_vga <= tandy_page_data_pending_vga;
-                tandy_page_pending_valid_vga <= 1'b0;
-            end
-            prev_vblank_cga <= VBLANK_CGA;
+            // Immediate apply after CDC to match PCjr/PCem memctrl behavior.
+            tandy_page_data_scan_vga <= tandy_page_data_vga_2;
+            tandy_page_data_pending_vga <= tandy_page_data_vga_2;
+            tandy_page_pending_valid_vga <= (tandy_page_data_vga_2 != tandy_page_data_scan_vga);
 
             cga_io_address_1        <= video_io_address;
             cga_io_address_2        <= cga_io_address_1;
@@ -1350,14 +1347,14 @@ end
     wire [16:0] cga_copy_addr  = splash_copy_active ? {5'd0, splash_copy_addr} : splash_clear_addr;
     wire [7:0]  cga_copy_data  = splash_copy_active ? splash_rom_data : splash_clear_data;
     wire [16:0] cga_vram_addra = cga_vram_copy ? cga_copy_addr :
-                                 (tandy_video_en ? (video_mem_select_1 ? video_ram_address :
-                                 (pcjr_memctrl_32k ? {pcjr_b8000_page[1:0], video_ram_address[14:0]} :
+                                 (tandy_video_en ? ((video_mem_select_1 || video_mem_write_select_1) ? video_ram_address :
+                                 (pcjr_memctrl_32k ? {pcjr_b8000_page[2:1], 1'b0, video_ram_address[13:0]} :
                                  {pcjr_b8000_page, video_ram_address[13:0]})) : {3'b000, video_ram_address[13:0]});
     wire [16:0] cga_vram_addrb = tandy_video_en ?
-                                 (pcjr_memctrl_32k_vga ? {pcjr_vram_page_vga[1:0], CGA_VRAM_ADDR[14:0]} :
+                                 (pcjr_memctrl_32k_vga ? {pcjr_vram_page_vga[2:1], CGA_VRAM_ADDR[14:0]} :
                                  {pcjr_vram_page_vga, CGA_VRAM_ADDR[13:0]}) : {3'b000, CGA_VRAM_ADDR[13:0]};
     wire [7:0]  cga_vram_dina  = cga_vram_copy ? cga_copy_data : video_ram_data;
-    wire        cga_vram_ena   = cga_vram_copy ? 1'b1 : (cga_mem_select_1 || video_mem_select_1);
+    wire        cga_vram_ena   = cga_vram_copy ? 1'b1 : (cga_mem_select_1 || video_mem_select_1 || video_mem_write_select_1);
     wire        cga_vram_wea   = cga_vram_copy ? 1'b1 : (~video_memory_write_n & memory_write_n);
     wire        cga_vram_enb   = CGA_VRAM_ENABLE;
 

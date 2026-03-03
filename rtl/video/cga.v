@@ -164,10 +164,8 @@ module cga(
 
     reg bus_memw_synced_l;
     reg bus_memr_synced_l;
-    reg bus_ior_synced_l;
-    reg bus_iow_synced_l;
-    reg prev_bus_ior_synced_l;
-    reg prev_bus_iow_synced_l;
+    reg prev_bus_ior_l;
+    reg prev_bus_iow_l;
     wire bus_ior_pulse;
     wire bus_iow_pulse;
 
@@ -190,14 +188,14 @@ module cga(
     begin
         //bus_memw_synced_l <= bus_memw_l;
         //bus_memr_synced_l <= bus_memr_l;
-        bus_ior_synced_l <= bus_ior_l;
-        bus_iow_synced_l <= bus_iow_l;
-        prev_bus_ior_synced_l <= bus_ior_synced_l;
-        prev_bus_iow_synced_l <= bus_iow_synced_l;
+        prev_bus_ior_l <= bus_ior_l;
+        prev_bus_iow_l <= bus_iow_l;
     end
 
-    assign bus_ior_pulse = ~bus_ior_synced_l & prev_bus_ior_synced_l;
-    assign bus_iow_pulse = ~bus_iow_synced_l & prev_bus_iow_synced_l;
+    // I/O strobes are already synchronized in Peripherals.sv before reaching this module.
+    // Use direct edge detect here to avoid one-extra-cycle skew of address/data vs strobe.
+    assign bus_ior_pulse = ~bus_ior_l & prev_bus_ior_l;
+    assign bus_iow_pulse = ~bus_iow_l & prev_bus_iow_l;
 
     // Some modules need a non-inverted vsync trigger
     assign vsync = ~vsync_l;
@@ -325,7 +323,7 @@ module cga(
                 end
                 pcjr_array_ff <= ~pcjr_array_ff;
             end
-        end else if (~bus_iow_synced_l) begin
+        end else if (~bus_iow_l) begin
             if (control_cs) begin
                 cga_control_reg <= bus_d;
             end else if (colorsel_cs) begin
@@ -354,7 +352,7 @@ module cga(
 		  
 		  .ENABLE(1'b1),
 		  .nCS(~crtc_cs),
-		  .R_nW(bus_iow_synced_l),
+		  .R_nW(bus_iow_l),
 		  .RS(bus_a[0]),
 		  .DI(bus_d),
 		  .DO(bus_out_crtc),
