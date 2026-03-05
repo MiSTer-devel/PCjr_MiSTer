@@ -226,8 +226,7 @@ module KFPS2KB #(
         else if (clear_keycode) begin
             irq         <= 1'b0;
             keycode     <= 8'h00;
-            // Don't clear break_flag here! It needs to persist for F0 break sequences
-            // break_flag will be cleared when the actual scancode is processed
+            break_flag  <= 1'b0;
         end
         else if (error_flag) begin
             // Error
