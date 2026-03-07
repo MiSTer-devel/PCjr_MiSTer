@@ -126,6 +126,7 @@ module PERIPHERALS #(
         // Others
         output  logic           pause_core,
         input   logic           cga_hw,
+        input   logic           cga_scandouble_en,
         input   logic           hercules_hw,
         output  logic           swap_video,
         input   logic   [3:0]   crt_h_offset,
@@ -1213,7 +1214,7 @@ end
     reg   [5:0]   R_CGA;
     reg   [5:0]   G_CGA;
     reg   [5:0]   B_CGA;
-    reg           HSYNC_CGA;
+    wire          HSYNC_CGA;
     reg           VSYNC_CGA;
     logic         vsync_sync_1;
     logic         vsync_sync_2;
@@ -1222,7 +1223,12 @@ end
     reg           VBLANK_CGA;
     reg           de_o_cga;
 
-    wire [3:0] video_cga;
+    wire        hsync_cga_raw;
+    wire        hsync_cga_sd;
+    wire [3:0] video_cga_raw;
+    wire [3:0] video_cga_sd;
+    wire [3:0] video_cga = cga_scandouble_en ? video_cga_sd : video_cga_raw;
+    assign HSYNC_CGA = cga_scandouble_en ? hsync_cga_sd : hsync_cga_raw;
     assign VGA_R = R_CGA;
     assign VGA_G = G_CGA;
     assign VGA_B = B_CGA;
@@ -1307,19 +1313,20 @@ end
         .ram_we_l                   (CGA_VRAM_ENABLE),
         .ram_a                      (CGA_VRAM_ADDR),
         .ram_d                      (CGA_VRAM_DOUT),
-        .hsync                      (HSYNC_CGA),              // non scandoubled
-    //  .dbl_hsync                  (HSYNC_CGA),              // scandoubled
+        .hsync                      (hsync_cga_raw),
+        .dbl_hsync                  (hsync_cga_sd),
         .hblank                     (HBLANK_CGA),
         .vsync                      (VSYNC_CGA),
         .vblank                     (VBLANK_CGA),
         .vblank_border              (VGA_VBlank_border_raw),
         .std_hsyncwidth             (std_hsyncwidth_raw),
         .de_o                       (de_o_cga),
-        .video                      (video_cga),              // non scandoubled
-    //  .dbl_video                  (video_cga),              // scandoubled
+        .video                      (video_cga_raw),
+        .dbl_video                  (video_cga_sd),
         .splashscreen               (splashscreen),
         .thin_font                  (thin_font),
         .tandy_video                (tandy_video_en),
+        .scandouble_en              (cga_scandouble_en),
         .pcjr_addr_mode             (pcjr_addr_mode_vga),
         .grph_mode                  (grph_mode),
         .hres_mode                  (hres_mode),

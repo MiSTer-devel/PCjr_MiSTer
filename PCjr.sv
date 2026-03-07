@@ -309,6 +309,8 @@ module emu
     reg [2:0]   screen_mode_video_ff;
     reg         border_video_ff;
     reg         cga_hw;
+    wire        video_scandoubler_en = (scale_video_ff > 0) || forced_scandoubler;
+    wire        cga_scandouble_en = video_scandoubler_en;
     reg         hercules_hw;
 
     wire VGA_VBlank_border;
@@ -1243,6 +1245,7 @@ module emu
 		.cold_boot                          (cold_boot),
 		.pause_core                         (pause_core),
 		.cga_hw                             (cga_hw),
+		.cga_scandouble_en                  (cga_scandouble_en),
 		.hercules_hw                        (hercules_hw_sel),
 		.swap_video                         (swap_video),
 		.crt_h_offset                       (status[49:46]),
@@ -1456,7 +1459,7 @@ module emu
     wire HSync;
     wire VBlank;
     wire VSync;
-    wire ce_pixel_cga;
+    reg  ce_pixel_cga = 1'b0;
     wire de_o;
     wire [5:0] r, g, b;
     reg [7:0] raux_cga, gaux_cga, baux_cga;
@@ -1472,13 +1475,17 @@ module emu
     wire        VGA_DE_cga;
     wire [21:0] gamma_bus_cga;
     wire        CE_PIXEL_cga;
+    reg         ce_pixel_cga_2x = 1'b0;
+    wire        ce_pixel_cga_vid = cga_scandouble_en ? ce_pixel_cga_2x : ce_pixel_cga;
 
     assign CLK_VIDEO = clk_28_636;
     assign CLK_VIDEO_CGA = clk_28_636;
 
+    always @(posedge clk_28_636)
+        ce_pixel_cga_2x <= ~ce_pixel_cga_2x;
+
     assign VGA_SL = {scale_video_ff==3, scale_video_ff==2};
 
-    wire   scandoubler = (scale_video_ff>0); //|| forced_scandoubler);
 
     reg [14:0] HBlank_del;
     wire tandy_16_gfx;
@@ -1535,7 +1542,7 @@ module emu
     video_monochrome_converter video_mono_cga 
 	(
 		.clk_vid(CLK_VIDEO_CGA),
-		.ce_pix(ce_pixel_cga),
+		.ce_pix(ce_pixel_cga_vid),
 
 		.R({r, 2'b00}),
 		.G({g, 2'b00}),
@@ -1558,8 +1565,10 @@ module emu
     assign CE_PIXEL = ce_pixel;
     */
 
-    wire LHBL = border_video_ff ? HBlank_fixed : HBlank_VGA;
-    wire LVBL = border_video_ff ? (std_hsyncwidth ? VGA_VBlank_border : VBlank) : VBlank;
+    wire LHBL = cga_scandouble_en ? HBlank :
+                (border_video_ff ? HBlank_fixed : HBlank_VGA);
+    wire LVBL = cga_scandouble_en ? VBlank :
+                (border_video_ff ? (std_hsyncwidth ? VGA_VBlank_border : VBlank) : VBlank);
 
     wire       pre2x_LHBL, pre2x_LVBL;
     wire [7:0] pre2x_r, pre2x_g, pre2x_b;
@@ -1571,7 +1580,7 @@ module emu
 
 		.CLK_VIDEO(CLK_VIDEO_CGA),
 		.CE_PIXEL(CE_PIXEL_cga),
-		.ce_pix(ce_pixel_cga),
+		.ce_pix(ce_pixel_cga_vid),
 
 		.freeze_sync(),
 
@@ -1584,7 +1593,7 @@ module emu
 		.HSync(HSync),
 		.VSync(VSync),
 
-		.scandoubler(scandoubler),
+		.scandoubler(1'b0),
 		.hq2x(scale_video_ff==1),
 		.gamma_bus(gamma_bus_cga),
 

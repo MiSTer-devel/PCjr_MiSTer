@@ -45,6 +45,7 @@ module cga(
     input splashscreen,
     input thin_font,
     input tandy_video,
+    input scandouble_en,
     input [1:0] pcjr_addr_mode,
     output grph_mode,
     output hres_mode,
@@ -130,9 +131,14 @@ module cga(
     wire [3:0] border_color;
 
     wire hsync_int;
+    wire hblank_crtc;
+    wire vblank_crtc;
     wire vsync_l;
+    wire vsync_sd_l;
+    wire vblank_sd;
     wire cursor;
     wire display_enable;
+    wire display_enable_sd;
     wire [3:0] hsync_width_crtc;
 
     // Two different clocks from the sequencer
@@ -173,7 +179,8 @@ module cga(
     //reg[1:0] wait_state = 2'd0;
     //reg bus_rdy_latch; 
 
-    assign de_o = display_enable;
+    assign de_o = scandouble_en ? display_enable_sd : display_enable;
+    assign hblank = scandouble_en ? ~display_enable_sd : hblank_crtc;
     
     assign ram_a = {4'h0, pixel_addr14, pixel_addr13, crtc_addr[11:0],
                     vram_read_a0};
@@ -197,8 +204,10 @@ module cga(
     assign bus_ior_pulse = ~bus_ior_l & prev_bus_ior_l;
     assign bus_iow_pulse = ~bus_iow_l & prev_bus_iow_l;
 
-    // Some modules need a non-inverted vsync trigger
-    assign vsync = ~vsync_l;
+    // Some modules need a non-inverted vsync trigger.
+    // In scandoubled mode use VSYNC synthesized by the scandoubler.
+    assign vsync = scandouble_en ? ~vsync_sd_l : ~vsync_l;
+    assign vblank = scandouble_en ? vblank_sd : vblank_crtc;
 
     // Mapped IO
     assign crtc_cs = (bus_a[14:3] == IO_BASE_ADDR[14:3]) & ~bus_aen & cga_hw; // 3D4/3D5
@@ -357,9 +366,9 @@ module cga(
 		  .DI(bus_d),
 		  .DO(bus_out_crtc),
 		  
-		  .hblank(hblank),
-		  .vblank(vblank),
-		  .line_reset(line_reset),
+		  .hblank(hblank_crtc),
+		  .vblank(vblank_crtc),
+		  .line_reset(),
 		  
 		  .VSYNC(vsync_l),
 		  .HSYNC(hsync_int),
@@ -479,14 +488,24 @@ module cga(
         end
     end
 
-    /*
-    cga_scandoubler scandoubler (
+    video_scandoubler #(
+        .PIXEL_WIDTH(4),
+        .H_TOTAL_MAX(912)
+    ) scandoubler (
         .clk(clk),
-        .line_reset(line_reset),
-        .video(video),          
-        .dbl_hsync(dbl_hsync),
-        .dbl_video(dbl_video)
+        .ce_pix(clkdiv[0]),
+        .ce_2x(1'b1),
+        .scandouble_en(scandouble_en),
+        .pixel_in(video),
+        .hsync_in(hsync_int),
+        .vsync_in(vsync_l),
+        .vblank_in(vblank_crtc),
+        .display_enable_in(display_enable),
+        .pixel_out(dbl_video),
+        .hsync_out(dbl_hsync),
+        .vsync_out(vsync_sd_l),
+        .vblank_out(vblank_sd),
+        .display_enable_out(display_enable_sd)
     );
-    */
 
 endmodule
