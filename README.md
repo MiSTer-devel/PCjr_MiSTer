@@ -1,72 +1,176 @@
-# [IBM Tandy 1000](https://en.wikipedia.org/wiki/Tandy_1000) for [MiSTer FPGA](https://mister-devel.github.io/MkDocs_MiSTer/)
+# IBM PCjr for MiSTer FPGA
 
-Tandy 1000 port for MiSTer by [@spark2k06](https://github.com/spark2k06/).
+IBM PCjr core for [MiSTer FPGA](https://mister-devel.github.io/MkDocs_MiSTer/) by [@spark2k06](https://github.com/spark2k06/).
 
-Discussion and evolution of the core in the following misterfpga forum section:
+Discussion and evolution of the core in the MiSTer FPGA forum:
 
 https://misterfpga.org/viewforum.php?f=40
 
 ![Splash](splash.jpg)
 
-## Description
+## Overview
 
-The purpose of this core is to implement a Tandy 1000 as reliable as possible. For this purpose, the [MCL86 core](https://github.com/MicroCoreLabs/Projects/tree/master/MCL86) from [@MicroCoreLabs](https://github.com/MicroCoreLabs/) and [KFPC-XT](https://github.com/kitune-san/KFPC-XT) from [@kitune-san](https://github.com/kitune-san) are used.
+This repository targets the IBM PCjr, not the Tandy 1000 line.
 
-The [Graphics Gremlin project](https://github.com/schlae/graphics-gremlin) from TubeTimeUS ([@schlae](https://github.com/schlae)) has also been integrated in this first stage.
+The core is built around the [MCL86 core](https://github.com/MicroCoreLabs/Projects/tree/master/MCL86) from [@MicroCoreLabs](https://github.com/MicroCoreLabs/) and [KFPC-XT](https://github.com/kitune-san/KFPC-XT) from [@kitune-san](https://github.com/kitune-san), with PCjr-specific video, memory, cartridge, keyboard and peripheral behaviour added on top.
 
-[JT89](https://github.com/jotego/jt89) by Jose Tejada (@jotego) was integrated for Tandy sound.
+## Current status
 
-## Key features
+Implemented and relevant today:
 
-* 8088 CPU with these speed settings: 4.77 MHz, 7.16 MHz, 9.54 MHz cycle accurate, and PC/AT 286 at 3.5MHz equivalent (max. speed)
-* Support for IBM Tandy 1000
-* Tandy graphics with 128Kb of shared RAM + CGA graphics
-* Main memory 640Kb
-* Simulated Composite Video, F11 -> Swap Video Output with RGB
-* Audio: Tandy, speaker
-* Joystick support
-* Mouse support into COM1 serial port, this works like any Microsoft mouse... you just need a driver to configure it, like CTMOUSE 1.9 (available into hdd folder)
+* IBM PCjr BIOS boot flow
+* PCjr/Tandy graphics modes with PCjr-specific fixes
+* Configurable system RAM from 128 KB to 640 KB
+* Cartridge support through two `JRC` slots
+* Floppy support through BIOS-compatible disk images
+* PC speaker and PCjr 3-voice audio mixing
+* Composite video simulation and alternate display palettes
+* PCjr keyboard and joystick support
+* Cassette `SAVE` audio through the PC speaker path
 
-## Build configuration
+Present in the OSD but not currently active for loading:
 
-This core uses a fixed configuration:
+* `Cassette Tape (JRT)`
+* `Tape sound`
 
-* System/ROM set to Tandy
-* Tandy video, audio, and keyboard enabled
-* CGA enabled as the baseline video path
-* OPL2, CMS, EMS, A000 UMB, and HGC/MDA disabled
+These cassette-related OSD entries are intentionally shown as shaded/disabled. Cassette loading is pending a future PCjr-specific implementation.
 
-## Quick Start
+## OSD features
 
-* Copy the contents of `games/Tandy1000` to your MiSTer SD Card.
-* Select the core from Computers/Tandy1000.
-* Press WinKey + F12 on your keyboard.
-  * CPU Speed: PC/AT 3.5MHz (Max speed)
-  * BIOS -> Tandy BIOS: tandy.rom
-* Choose Reset & apply settings.
+The current OSD exposes these relevant PCjr options:
 
-## ROM Instructions
+* `PCjr BIOS`
+* `Cartridge 1 (JRC)`
+* `Cartridge 2 (JRC)`
+* `Cassette Tape (JRT)` shaded
+* `RAM Size`
+* `Boot Splash Screen`
+* `Write Protect`
+* `Speaker Volume`
+* `PCjr Volume`
+* `Tape sound` shaded
+* `Audio Boost`
+* `Stereo Mix`
+* `CRT H offset`
+* `CRT V offset`
+* `VSync Width`
+* `HSync Width`
+* `Scandoubler Fx`
+* `Aspect ratio`
+* `Border`
+* `Composite video`
+* `Display`
+* `Joystick 1`
+* `Joystick 2`
+* `Sync Joy to CPU Speed`
+* `Swap Joysticks`
 
-ROMs should be provided initially from the BIOS section of the OSD menu. The core has a single BIOS slot; on subsequent boots it is not necessary to provide them unless you want to use others. Original and copyrighted ROMs can be generated on the fly using the python scripts available in the SW folder of this repository:
+## Media support
 
-* `make_rom_with_tandy.py`: A valid ROM is created for the Tandy core (tandy.rom) based on the original Tandy 1000 ROM.
+### BIOS
 
+The main PCjr BIOS is loaded from the OSD:
 
-## Other BIOSes
+* `System & BIOS -> PCjr BIOS`
 
-* https://github.com/640-KB/GLaBIOS
+The BIOS file is expected as a ROM image provided by the user. Original IBM ROMs are copyrighted and are not distributed with this repository.
 
-## Mounting the FDD image
+Alternative BIOS projects may work depending on compatibility, but the primary target is original PCjr BIOS behaviour.
 
-The floppy disk image size must be compatible with the BIOS, for example:
+### Cartridge
 
-* On Tandy 1000 only 360Kb images work well.
-* Other BIOS may not be compatible, such as OpenXT by Ja'akov Miles and Jon Petroski.
+Two cartridge slots are available in the OSD:
 
-It is possible to use images smaller than the size supported by the BIOS, but only pre-formatted images, as it will not be possible to format them from MS-Dos.
+* `Cartridge 1 (JRC)`
+* `Cartridge 2 (JRC)`
+
+Current cartridge handling is designed around JRC images loaded from the OSD. Each slot maps independently into the PCjr cartridge area. After changing cartridge images, a full core restart is required for the new cartridge state to take effect; a simple reset is not enough.
+
+### Floppy
+
+Floppy `IMG/IMA/VFD` mounting is available from the main media slot in the OSD.
+
+Practical notes:
+
+* BIOS compatibility still matters for accepted image formats and geometry
+* Using disk images that match what the loaded BIOS expects is recommended
+* Preformatted images are safest when working with unusual sizes
+
+### Cassette
+
+The OSD currently shows a cassette media slot using the `JRT` extension.
+
+Current state:
+
+* Cassette `SAVE` activity is routed to audible output through the PC speaker path
+* Cassette `LOAD` is not enabled yet
+* Cassette OSD entries remain visible but shaded so the intended UI path is preserved for future work
+
+## Audio
+
+The core currently mixes:
+
+* PC speaker
+* PCjr 3-voice sound
+* Cassette `SAVE` waveform audio when save activity is present
+
+`Tape sound` remains visible in the OSD only as a placeholder for future cassette loading support.
+
+## Video
+
+The core includes PCjr-oriented video behaviour rather than a generic CGA/Tandy port.
+
+Relevant exposed options include:
+
+* Composite video enable/disable
+* Scandoubler effects
+* Aspect ratio
+* Border enable/disable
+* Palette/display mode selection
+* CRT H/V offsets
+* VSync/HSync width controls
+
+Recent video work in the repository also includes a dedicated CGA scandoubler path intended to be safer for UM6845R-sensitive software.
+
+## Input and peripherals
+
+* PCjr keyboard path
+* Joystick 1 and 2 configuration:
+  * Analog
+  * Digital
+  * Disabled
+* Joystick swap option
+* CPU-synchronised joystick timing option
+
+The core also contains UART/serial plumbing used internally by the platform integration, but that is not currently a primary user-facing feature of this README.
+
+## Quick start
+
+1. Copy the core to your MiSTer setup in the usual way.
+2. Launch the core from the computers section.
+3. Open the OSD.
+4. Load a PCjr BIOS in `System & BIOS -> PCjr BIOS`.
+5. Optionally load one or two `JRC` cartridge images.
+6. Optionally mount a floppy image.
+7. Use `Reset & apply settings` after changing latched hardware options such as RAM size.
+
+Suggested first-run checks:
+
+* Confirm BIOS boots correctly
+* Confirm floppy access works with a BIOS-compatible image
+* Confirm cartridges mount correctly if used
+* Confirm cassette-related options are visible but shaded
+
+## Build notes
+
+This README reflects the current production-facing state of the core:
+
+* IBM PCjr system identity
+* Cartridge and floppy support available
+* Cassette `SAVE` audio available
+* Cassette `LOAD` still pending
 
 ## Developers
 
-Any contribution and pull request, please carry it out on the prerelease branch. Periodically they will be reviewed, moved and merged into the main branch, together with the corresponding release.
+Contributions and pull requests should be prepared against the appropriate development branch before being reviewed and merged.
 
-Thank you!
