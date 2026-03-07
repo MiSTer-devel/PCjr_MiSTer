@@ -211,6 +211,7 @@ module emu
     localparam CONF_STR_SYSTEM = "PCjr;UART115200:115200;";
     localparam CONF_STR_ROM = "P1FC1,ROM,PCjr BIOS:;P1-;";
     localparam CONF_STR_CART = "P1FC2,JRC,Cartridge 1 (JRC):;P1FC3,JRC,Cartridge 2 (JRC):;";
+    localparam CONF_STR_TAPE = "d1P1FC4,JRT,Cassette Tape (JRT):;";
     localparam CONF_STR_TANDY_AUDIO = "P2o23,PCjr Volume,1,2,3,4;";
 
     localparam CONF_STR = {
@@ -228,9 +229,12 @@ module emu
         "P1-;",
 		CONF_STR_CART,
 		"P1-;",	
+        CONF_STR_TAPE,
+		"P1-;",
 		"P2,Audio & Video;",
 		"P2-;",
 		"P2o01,Speaker Volume,1,2,3,4;",
+        "d2P2o9,Tape sound,Disabled,Enabled;",
 		CONF_STR_TANDY_AUDIO,
 		"P2o45,Audio Boost,No,2x,4x;",
 		"P2o67,Stereo Mix,none,25%,50%,100%;",
@@ -323,6 +327,8 @@ module emu
         VIDEO_ARY               <= (!ar) ? 12'd3 : 12'd0;
     end
 
+    wire [15:0] status_menumask = {13'd0, 1'b0, 1'b0, status[5]};
+
     hps_io #(.CONF_STR(CONF_STR), .PS2DIV(2000), .PS2WE(1), .WIDE(1)) hps_io 
 	(
 		.clk_sys(clk_chipset),
@@ -334,7 +340,7 @@ module emu
 
 		.buttons(buttons),
 		.status(status),
-		.status_menumask({status[5]}),
+		.status_menumask(status_menumask),
 
 		.ps2_kbd_clk_in		(ps2_kbd_clk_out),
 		.ps2_kbd_data_in	(ps2_kbd_data_out),
@@ -397,10 +403,10 @@ module emu
     wire clk_28_636;
     wire clk_4_77;
     reg  clk_14_318 = 1'b0;
-    wire clk_cpu;
-    wire pclk;
+    logic clk_cpu;
+    logic pclk;
     wire clk_chipset;
-    wire peripheral_clock;
+    logic peripheral_clock;
 
     localparam [27:0] cur_rate = 28'd50000000;
 
@@ -450,8 +456,13 @@ module emu
         ce_pixel_cga <= clk_14_318;	//if outside always block appears an overscan column in CGA mode
     end
 
-    always @(posedge clk_4_77)
-        peripheral_clock <= ~peripheral_clock; // 2.385Mhz
+    always @(posedge clk_4_77 or posedge reset_wire)
+    begin
+        if (reset_wire)
+            peripheral_clock <= 1'b0;
+        else
+            peripheral_clock <= ~peripheral_clock; // 2.385Mhz
+    end
 
     //////////////////////////////////////////////////////////////////
 
@@ -1040,6 +1051,37 @@ module emu
 
     logic   [7:0]   port_b_out;
     logic   [7:0]   port_c_in;
+    logic           cassette_in;
+    wire            cassette_out;
+    wire            cassette_motor;
+    logic           cassette_out_d;
+    logic   [17:0]  cassette_out_age;
+    localparam [17:0] CASS_OUT_ACTIVE_AGE = 18'd150000; // ~2.3ms @ 64MHz
+
+    assign cassette_in = 1'b0;
+
+    wire            cassette_out_active = (cassette_out_age < CASS_OUT_ACTIVE_AGE);
+    wire            tape_save_active = cassette_motor && port_b_out[0] && cassette_out_active;
+    wire            tape_wave = cassette_out;
+    wire            tape_audio = tape_save_active && tape_wave;
+
+    always_ff @(posedge clk_chipset or posedge reset_sdram or posedge reset)
+    begin
+        if (reset_sdram || reset)
+        begin
+            cassette_out_d   <= 1'b0;
+            cassette_out_age <= {18{1'b1}};
+        end
+        else
+        begin
+            cassette_out_d <= cassette_out;
+            if (cassette_out_d != cassette_out)
+                cassette_out_age <= 18'd0;
+            else if (cassette_out_age != {18{1'b1}})
+                cassette_out_age <= cassette_out_age + 18'd1;
+        end
+    end
+
     wire    [1:0]   fdd_present;
     reg     [7:0]   sw;
 
@@ -1049,7 +1091,7 @@ module emu
     assign  sw_base = 6'b101101;
     assign  sw_floppy = fdd_present[1] ? 2'b01 : 2'b00;
     assign  sw = {sw_floppy, sw_base}; // DIP switches (CGA and floppy count)
-    assign  port_c_in[3:0] = port_b_out[3] ? sw[7:4] : sw[3:0];
+    assign  port_c_in = {4'h0, (port_b_out[3] ? sw[7:4] : sw[3:0])};
 
     wire tandy_bios_flag = bios_write_n ? 1'b1 : tandy_bios_write;
 
@@ -1132,6 +1174,9 @@ module emu
 		.port_c_in                          (port_c_in),
 		.port_b_in                          (port_b_out),
 		.speaker_out                        (speaker_out),
+		.cassette_in                        (cassette_in),
+		.cassette_out                       (cassette_out),
+		.cassette_motor                     (cassette_motor),
 		.ps2_clock                          (device_clock),
 		.ps2_data                           (device_data),
 		.ps2_clock_out                      (ps2_kbd_clk_out),
@@ -1254,6 +1299,8 @@ module emu
     wire [10:0] tandy_snd_e;
     wire [16:0] tandy_snd = {{{2{tandy_snd_e[10]}}, {4{tandy_snd_e[10]}}, tandy_snd_e} << status[35:34], 2'b00};
     wire [16:0] spk_vol =  {2'b00, {3'b000,~speaker_out} << status[33:32], 11'd0};
+    wire [16:0] tape_vol = tape_audio ? {2'b00, ({3'b000,tape_wave} << status[33:32]), 10'd0, 1'b0} : 17'd0;
+    wire [16:0] spk_mix  = spk_vol + tape_vol;
     wire        speaker_out;
 
     localparam [3:0] comp_f1 = 4;
@@ -1284,7 +1331,7 @@ module emu
     begin
         reg [16:0] tmp_l;
 
-        tmp_l <= tandy_snd + spk_vol;
+        tmp_l <= tandy_snd + spk_mix;
 
         // clamp the output
         out_l <= (^tmp_l[16:15]) ? {tmp_l[16], {15{tmp_l[15]}}} : tmp_l[15:0];
@@ -1298,7 +1345,7 @@ module emu
     begin
         reg [16:0] tmp_r;
 
-        tmp_r <= tandy_snd + spk_vol;
+        tmp_r <= tandy_snd + spk_mix;
 
         // clamp the output
         out_r <= (^tmp_r[16:15]) ? {tmp_r[16], {15{tmp_r[15]}}} : tmp_r[15:0];

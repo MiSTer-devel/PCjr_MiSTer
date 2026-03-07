@@ -54,6 +54,9 @@ module PERIPHERALS #(
         // Peripherals
         output  logic   [2:0]   timer_counter_out,
         output  logic           speaker_out,
+        input   logic           cassette_in,
+        output  logic           cassette_out,
+        output  logic           cassette_motor,
         output  logic   [7:0]   port_a_out,
         output  logic           port_a_io,
         input   logic   [7:0]   port_b_in,
@@ -387,6 +390,8 @@ module PERIPHERALS #(
 
     assign  timer_interrupt = timer_counter_out[0];
     assign  speaker_out     = timer_counter_out[2] & spkdata;
+    assign  cassette_out    = timer_counter_out[2];
+    assign  cassette_motor  = ~port_b_out[3];
 
     //
     // 8255
@@ -401,11 +406,11 @@ module PERIPHERALS #(
     wire            pcjr_cable_connected_n = 1'b0;
     // PCjr port 62h bit4 is selected by PB3:
     // PB3=1 -> speaker/PIT status, PB3=0 -> cassette/input path.
-    wire            pcjr_port62_bit4 = port_b_out[3] ? timer_counter_out[2] : port_c_in[4];
+    wire            pcjr_port62_bit4 = port_b_out[3] ? cassette_out : cassette_in;
     wire    [7:0]   pcjr_port_c_in = {
         pcjr_cable_connected_n,
         pcjr_keybd_in,
-        timer_counter_out[2],
+        cassette_out,
         pcjr_port62_bit4,
         port_c_in[3:1],
         keybd_latch
