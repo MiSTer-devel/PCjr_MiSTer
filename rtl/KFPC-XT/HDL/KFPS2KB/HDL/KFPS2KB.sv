@@ -8,7 +8,7 @@ module KFPS2KB #(
     parameter over_time = 16'd1000
 ) (
     input   logic           clock,
-    input   logic           peripheral_clock,
+    input   logic           peripheral_ce,
     input   logic           reset,
 
     input   logic           device_clock,
@@ -38,7 +38,7 @@ module KFPS2KB #(
         .over_time      (over_time)
     ) u_Shift_Register (
         .clock              (clock),
-        .peripheral_clock   (peripheral_clock),
+        .peripheral_ce      (peripheral_ce),
         .reset              (reset),
 
         .device_clock       (device_clock),
@@ -248,17 +248,9 @@ module KFPS2KB #(
                 break_flag  <= 1'b0;
             end
             else if (register == 8'hF0) begin
-                // Break prefix - set flag, don't generate IRQ
                 irq         <= 1'b0;
                 keycode     <= 8'h00;
                 break_flag  <= 1'b1;
-            end
-            else if (register == 8'hE0 || register == 8'hE1) begin
-                // Extended key prefix - ignore, don't generate IRQ
-                // The actual scancode will follow and be processed normally
-                irq         <= 1'b0;
-                keycode     <= 8'h00;
-                // Don't change break_flag - it may be set from a previous F0
             end
             else if (register == 8'h78) begin
                 // F11: CGA <-> Hercules (PCXT), RGB <-> Composite (Tandy)
