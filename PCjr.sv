@@ -318,7 +318,7 @@ module emu
     wire pause_core;
     wire swap_video;
 
-    always @(posedge CLK_VIDEO)
+    always @(posedge clk_57_272)
     begin
         scale_video_ff          <= scale;
         screen_mode_video_ff    <= screen_mode;
@@ -403,7 +403,9 @@ module emu
 
     wire clk_100;
     wire clk_28_636;
-    wire clk_4_77;
+    wire clk_57_272;
+    wire clk_114_544;
+    wire clk_video_out_ps;
     reg  clk_14_318 = 1'b0;
     logic clk_cpu;
     logic cpu_ce_posedge;
@@ -428,12 +430,15 @@ module emu
         .refclk(CLK_50M),
         .rst(0),
         .outclk_0(clk_28_636),
-        .outclk_1(clk_4_77),
+        .outclk_1(clk_57_272),
+        .outclk_2(clk_114_544),
+        .outclk_3(clk_video_out_ps),
         .locked(pll_system_locked)
     );
 
     wire reset_wire = RESET | status[0] | buttons[1] | !pll_locked | !pll_system_locked | splashscreen |
                       splash_reset_hold | splash_pending;
+    wire video_retime_reset = RESET | status[0] | buttons[1] | !pll_locked | !pll_system_locked | splash_pending;
     wire reset_sdram_wire = RESET | !pll_locked;
 
     // Cold boot signal: triggered by OSD reset to force BIOS memory test
@@ -1461,11 +1466,39 @@ module emu
     wire        CE_PIXEL_cga;
     reg         ce_pixel_cga_2x = 1'b0;
     wire        ce_pixel_cga_vid = cga_scandouble_en ? ce_pixel_cga_2x : ce_pixel_cga;
+    reg  [7:0]  VGA_R_cga_src = 8'd0;
+    reg  [7:0]  VGA_G_cga_src = 8'd0;
+    reg  [7:0]  VGA_B_cga_src = 8'd0;
+    reg         VGA_HS_cga_src = 1'b0;
+    reg         VGA_VS_cga_src = 1'b0;
+    reg         VGA_DE_cga_src = 1'b0;
+    reg         LHBL_cga_src = 1'b1;
+    reg         LVBL_cga_src = 1'b1;
+    reg         CE_PIXEL_cga_src = 1'b0;
+    reg  [7:0]  VGA_R_cga_ps = 8'd0;
+    reg  [7:0]  VGA_G_cga_ps = 8'd0;
+    reg  [7:0]  VGA_B_cga_ps = 8'd0;
+    reg         VGA_HS_cga_ps = 1'b0;
+    reg         VGA_VS_cga_ps = 1'b0;
+    reg         VGA_DE_cga_ps = 1'b0;
+    reg         LHBL_cga_ps = 1'b1;
+    reg         LVBL_cga_ps = 1'b1;
+    reg         CE_PIXEL_cga_ps = 1'b0;
+    reg         CE_PIXEL_cga_ps_d = 1'b0;
+    reg  [7:0]  VGA_R_cga_hdmi = 8'd0;
+    reg  [7:0]  VGA_G_cga_hdmi = 8'd0;
+    reg  [7:0]  VGA_B_cga_hdmi = 8'd0;
+    reg         VGA_HS_cga_hdmi = 1'b0;
+    reg         VGA_VS_cga_hdmi = 1'b0;
+    reg         VGA_DE_cga_hdmi = 1'b0;
+    reg         LHBL_cga_hdmi = 1'b1;
+    reg         LVBL_cga_hdmi = 1'b1;
+    reg         CE_PIXEL_cga_hdmi = 1'b0;
 
-    assign CLK_VIDEO = clk_28_636;
-    assign CLK_VIDEO_CGA = clk_28_636;
+    assign CLK_VIDEO = clk_video_out_ps;
+    assign CLK_VIDEO_CGA = clk_57_272;
 
-    always @(posedge clk_28_636)
+    always @(posedge clk_57_272)
         ce_pixel_cga_2x <= ~ce_pixel_cga_2x;
 
     assign VGA_SL = {scale_video_ff==3, scale_video_ff==2};
@@ -1516,9 +1549,7 @@ module emu
         end
     end
 
-    // Credits overlay expects a pixel enable synchronous to clk_28_636.
-
-    always @ (posedge clk_28_636) begin
+    always @ (posedge clk_video_out_ps) begin
         video_pause_core_buf    <= pause_core;
         video_pause_core        <= video_pause_core_buf;
     end
@@ -1590,19 +1621,84 @@ module emu
 
 	);
 
-    assign VGA_R_AUX  = VGA_R_cga;
-    assign VGA_G_AUX  = VGA_G_cga;
-    assign VGA_B_AUX  = VGA_B_cga;
-    assign VGA_HS = VGA_HS_cga;
-    assign VGA_VS = VGA_VS_cga;
-    assign VGA_DE = VGA_DE_cga;
+    always @(posedge clk_57_272)
+    begin
+        VGA_R_cga_src <= VGA_R_cga;
+        VGA_G_cga_src <= VGA_G_cga;
+        VGA_B_cga_src <= VGA_B_cga;
+        VGA_HS_cga_src <= VGA_HS_cga;
+        VGA_VS_cga_src <= VGA_VS_cga;
+        VGA_DE_cga_src <= VGA_DE_cga;
+        LHBL_cga_src <= LHBL;
+        LVBL_cga_src <= LVBL;
+        CE_PIXEL_cga_src <= CE_PIXEL_cga;
+    end
+
+    // Retimes the exact-frequency CGA output onto a phase-shifted sibling clock.
+    always @(posedge clk_video_out_ps)
+    begin
+        if (video_retime_reset)
+        begin
+            VGA_R_cga_ps <= 8'd0;
+            VGA_G_cga_ps <= 8'd0;
+            VGA_B_cga_ps <= 8'd0;
+            VGA_HS_cga_ps <= 1'b0;
+            VGA_VS_cga_ps <= 1'b0;
+            VGA_DE_cga_ps <= 1'b0;
+            LHBL_cga_ps <= 1'b1;
+            LVBL_cga_ps <= 1'b1;
+            CE_PIXEL_cga_ps <= 1'b0;
+            CE_PIXEL_cga_ps_d <= 1'b0;
+            VGA_R_cga_hdmi <= 8'd0;
+            VGA_G_cga_hdmi <= 8'd0;
+            VGA_B_cga_hdmi <= 8'd0;
+            VGA_HS_cga_hdmi <= 1'b0;
+            VGA_VS_cga_hdmi <= 1'b0;
+            VGA_DE_cga_hdmi <= 1'b0;
+            LHBL_cga_hdmi <= 1'b1;
+            LVBL_cga_hdmi <= 1'b1;
+            CE_PIXEL_cga_hdmi <= 1'b0;
+        end
+        else
+        begin
+            CE_PIXEL_cga_hdmi <= CE_PIXEL_cga_ps & ~CE_PIXEL_cga_ps_d;
+            if (CE_PIXEL_cga_ps & ~CE_PIXEL_cga_ps_d)
+            begin
+                VGA_R_cga_hdmi <= VGA_R_cga_ps;
+                VGA_G_cga_hdmi <= VGA_G_cga_ps;
+                VGA_B_cga_hdmi <= VGA_B_cga_ps;
+                VGA_HS_cga_hdmi <= VGA_HS_cga_ps;
+                VGA_VS_cga_hdmi <= VGA_VS_cga_ps;
+                VGA_DE_cga_hdmi <= VGA_DE_cga_ps;
+                LHBL_cga_hdmi <= LHBL_cga_ps;
+                LVBL_cga_hdmi <= LVBL_cga_ps;
+            end
+
+            CE_PIXEL_cga_ps_d <= CE_PIXEL_cga_ps;
+            CE_PIXEL_cga_ps <= CE_PIXEL_cga_src;
+            VGA_R_cga_ps <= VGA_R_cga_src;
+            VGA_G_cga_ps <= VGA_G_cga_src;
+            VGA_B_cga_ps <= VGA_B_cga_src;
+            VGA_HS_cga_ps <= VGA_HS_cga_src;
+            VGA_VS_cga_ps <= VGA_VS_cga_src;
+            VGA_DE_cga_ps <= VGA_DE_cga_src;
+            LHBL_cga_ps <= LHBL_cga_src;
+            LVBL_cga_ps <= LVBL_cga_src;
+        end
+    end
+
+    assign VGA_R_AUX  = VGA_R_cga_hdmi;
+    assign VGA_G_AUX  = VGA_G_cga_hdmi;
+    assign VGA_B_AUX  = VGA_B_cga_hdmi;
+    assign VGA_HS = VGA_HS_cga_hdmi;
+    assign VGA_VS = VGA_VS_cga_hdmi;
+    assign VGA_DE = VGA_DE_cga_hdmi;
     assign gamma_bus = gamma_bus_cga;
-    assign CE_PIXEL  = CE_PIXEL_cga;
-    assign CE_PIXEL_CREDITS = CE_PIXEL_cga;
+    assign CE_PIXEL  = CE_PIXEL_cga_hdmi;
+    assign CE_PIXEL_CREDITS = CE_PIXEL_cga_hdmi;
 
-
-
-    wire credits_vb = LVBL;
+    wire credits_hb = LHBL_cga_hdmi;
+    wire credits_vb = LVBL_cga_hdmi;
     wire credits_border = border_video_ff;
 
     jtframe_credits #(
@@ -1611,11 +1707,11 @@ module emu
         .BLKPOL (1)
     ) u_credits(
         .rst        ( reset      ),
-        .clk        ( clk_28_636 ),
+        .clk        ( clk_video_out_ps ),
         .pxl_cen    ( CE_PIXEL_CREDITS ),
 
         // input image
-        .HB         ( LHBL  ),
+        .HB         ( credits_hb  ),
         .VB         ( credits_vb ),
         .rgb_in     ( { VGA_R_AUX, VGA_G_AUX, VGA_B_AUX } ),
         .rotate     ( 2'd0  ),
