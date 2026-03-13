@@ -110,14 +110,15 @@ module cga(
     wire [8:0] pcjr_mode_sel = {pcjr_array[3][3], (pcjr_array[0] & 8'h13)};
     wire pcjr_mode_text = (pcjr_mode_sel == 9'h00) || (pcjr_mode_sel == 9'h01);
     wire pcjr_mode_16 = (pcjr_mode_sel == 9'h13) || (pcjr_mode_sel == 9'h12);
-    wire pcjr_mode_640 = (pcjr_mode_sel == 9'h03) || (pcjr_mode_sel == 9'h102);
+    wire pcjr_mode_640x200x2 = (pcjr_mode_sel == 9'h102);
+    wire pcjr_mode_640 = (pcjr_mode_sel == 9'h03) || pcjr_mode_640x200x2;
     // 4-color PCjr planar mode uses mode 0x03 (640x200x4).
     // 320x200x4 (0x02) follows CGA-style packing and should not use this path.
     wire pcjr_color_4 = (pcjr_mode_sel == 9'h03);
     wire pcjr_grph_mode = ~pcjr_mode_text;
     wire pcjr_bw_mode = pcjr_array[0][2];
     // PCjr high-res flag: array[0][0] for most modes, but 640x200x2 (0x102) must force high-res.
-    wire pcjr_hres_mode = (pcjr_mode_sel == 9'h102) ? 1'b1 : pcjr_array[0][0];
+    wire pcjr_hres_mode = pcjr_mode_640x200x2 ? 1'b1 : pcjr_array[0][0];
     wire pcjr_video_enabled = pcjr_array[0][3];
     wire pcjr_blink_enabled = pcjr_array[3][2];
     wire [3:0] pcjr_palette_mask = pcjr_array[1][3:0];
@@ -287,7 +288,7 @@ module cga(
     // Note: vsync_l is directly from CRTC (active HIGH during vertical sync)
     // CGA/Tandy: bit 3 = vsync_l, bit 0 = ~display_enable (1 during retrace)
     // PCjr: bit 3 = vsync_l (1 during retrace), bit 0 = display_enable (1 during active display)
-    // Reference: PCem vid_pcjr.c - stat |= 8 during vsync, bit 0 follows dispon
+    // PCjr status: bit 3 follows vsync_l, bit 0 follows display_enable
     assign cga_status_reg = {4'b1111, vsync_l, 2'b10, ~display_enable};
     assign pcjr_status_reg = {3'b000, pcjr_status_toggle, vsync_l, 2'b00, display_enable};
 
@@ -408,7 +409,7 @@ module cga(
     assign pcjr_graphics = pcjr_video & grph_mode;
     assign pcjr_addr_use = (pcjr_addr_mode != 2'b00);
     assign pcjr_addr_hi = (pcjr_addr_mode == 2'b11);
-    // PCjr addr_mode controls VRAM page interleaving (reference: PCem vid_pcjr.c):
+    // PCjr addr_mode controls VRAM page interleaving:
     //   addr_mode=0 (Alpha): Linear addressing, offset=0, use crtc_addr[12] for bit 13
     //   addr_mode=1 (Low res): 2-page interleave, offset=(sc&1)*0x2000, use row_addr[0]
     //   addr_mode=3 (High res): 4-page interleave, offset=(sc&3)*0x2000, use row_addr[0:1]
@@ -421,7 +422,9 @@ module cga(
     assign pixel_addr14 = pcjr_graphics ? (pcjr_addr_hi ? row_addr[1] : 1'b0) :
                          (grph_mode ? row_addr[1] : 1'b0);
 
-    wire tandy_16_gfx = tandy_16_mode & grph_mode & hres_mode;
+    wire tandy_16_gfx = pcjr_video ?
+                        (grph_mode & hres_mode & (tandy_color_16 | tandy_color_4)) :
+                        (tandy_16_mode & grph_mode & hres_mode);
 
     // Sequencer state machine
     cga_sequencer sequencer (
@@ -474,6 +477,7 @@ module cga(
         .tandy_color_4(tandy_color_4),
         .tandy_color_16(tandy_color_16),
         .pcjr_video(pcjr_video),
+        .pcjr_mode_640x200x2(pcjr_mode_640x200x2),
         .pcjr_palette_mask(pcjr_palette_mask),
         .video(video)
     );

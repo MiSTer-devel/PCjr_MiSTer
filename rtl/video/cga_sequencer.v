@@ -46,14 +46,16 @@ module cga_sequencer(
 
     assign crtc_clk_int = (clkdiv == 5'd0) || (crtc_2x ? (clkdiv == 5'd16) : 0);
 
+    wire fetch_2x = crtc_2x;
+
     // Control signals based on the sequencer state
     assign vram_read = (clkdiv == 5'd1) || (clkdiv == 5'd2) || (clkdiv == 5'd3) ||
                        (clkdiv == 5'd17) || (clkdiv == 5'd18) || (clkdiv == 5'd19);
     assign vram_read_a0 = (clkdiv == 5'd2) || (clkdiv == 5'd18);
-    assign vram_read_char = (clkdiv == 5'd2) || (hres_mode ? (clkdiv == 5'd18) : 0);
-    assign vram_read_att = (clkdiv == 5'd3) || (hres_mode ? (clkdiv == 5'd19) : 0);
-    assign charrom_read = (clkdiv == 5'd3) || (hres_mode ? (clkdiv == 5'd19) : 0);// 3 and 19?
-    assign disp_pipeline = (clkdiv == (tandy_color_16 ? 5'd9 : tandy_16_gfx ? 5'd7 : 5'd4)) || (hres_mode ? (clkdiv == (tandy_16_gfx ? 5'd23 : 5'd20)) : 0);
+    assign vram_read_char = (clkdiv == 5'd2) || (fetch_2x ? (clkdiv == 5'd18) : 0);
+    assign vram_read_att = (clkdiv == 5'd3) || (fetch_2x ? (clkdiv == 5'd19) : 0);
+    assign charrom_read = (clkdiv == 5'd3) || (fetch_2x ? (clkdiv == 5'd19) : 0);// 3 and 19?
+    assign disp_pipeline = (clkdiv == (tandy_color_16 ? 5'd9 : tandy_16_gfx ? 5'd7 : 5'd4)) || (fetch_2x ? (clkdiv == (tandy_16_gfx ? 5'd23 : 5'd20)) : 0);
 	 
     assign crtc_clk = crtc_clk_int;
     assign clk_seq = clkdiv;

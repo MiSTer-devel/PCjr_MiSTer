@@ -37,6 +37,7 @@ module cga_pixel(
 	 input tandy_color_4,
 	 input tandy_color_16,
     input pcjr_video,
+    input pcjr_mode_640x200x2,
     input[3:0] pcjr_palette_mask,
     output[3:0] video
     );
@@ -54,9 +55,14 @@ module cga_pixel(
     reg[1:0] pix_bits_old;
     reg[3:0] tandy_bits;
 	 reg overscan;
-	 
-    reg[3:0] tandy_palette[0:15] = '{ 4'h0, 4'h1, 4'h2, 4'h3, 4'h4, 4'h5, 4'h6, 4'h7, 4'h8, 4'h9, 4'ha, 4'hb, 4'hc, 4'hd, 4'he, 4'hf };  
-	 
+    reg[3:0] pcjr_mode06_bits_left;
+    reg[15:0] pcjr_mode06_shift;
+    reg[15:0] pcjr_mode06_pending_word;
+    reg pcjr_mode06_pending_valid;
+
+    reg[3:0] tandy_palette[0:15] = '{ 4'h0, 4'h1, 4'h2, 4'h3, 4'h4, 4'h5, 4'h6, 4'h7, 4'h8, 4'h9, 4'ha, 4'hb, 4'hc, 4'hd, 4'he, 4'hf };
+
+    wire pcjr_mode06_pix;
     wire pix_640;
     wire[10:0] rom_addr;
     wire load_shifter;
@@ -67,14 +73,17 @@ module cga_pixel(
     reg[7:0] char_rom[0:4095];
     initial $readmemh("cga.hex", char_rom, 0, 4095);
 
+    assign pcjr_mode06_pix = pcjr_mode06_shift[15];
+
     wire [3:0] pcjr_pixel_index =
         !grph_mode ? video_out :
         tandy_color_16 ? video_out :
+        pcjr_mode_640x200x2 ? {3'b000, pcjr_mode06_pix} :
         (mode_640 && !tandy_color_4) ? {3'b000, pix_640} :
         {2'b00, video_out[2:1]};
     // PCjr palette mask applies to text, 16-color, and 640x200x4 modes.
     // Does NOT apply to 320x200x4 (uses fixed palette entries 0-3) or 640x200x2 (uses entries 0-1).
-    // Reference: PCem vid_pcjr.c - 640x200x4 uses (chr & pcjr->array[1]) for masking.
+    // 640x200x4 still applies the gate-array palette mask in this path.
     wire pcjr_apply_mask = ~grph_mode || tandy_color_16 || (tandy_color_4 && mode_640);
     wire [3:0] pcjr_masked_index = pcjr_apply_mask ? (pcjr_pixel_index & pcjr_palette_mask) : pcjr_pixel_index;
 
@@ -95,9 +104,9 @@ module cga_pixel(
 				else
 					video = tandy_palette[video_out];
 		  end else
-				video = video_out;		  
+				video = video_out;
     end
-	 
+
 
     // Latch character and attribute data from VRAM
     // at appropriate times
@@ -105,7 +114,7 @@ module cga_pixel(
     begin
 	     if (palette_write)
 		     tandy_palette[palette_index] = palette_value;
-			  
+
         if (vram_read_char) begin
             char_byte <= vram_data;
         end
@@ -117,10 +126,10 @@ module cga_pixel(
     // Fetch pixel data for graphics modes
     wire [2:0]muxin;
     assign muxin = hres_mode ? (clk_seq[3:1] + 3'd6) : (clk_seq[4:2] + 3'd7);
-	 
+
     always @ (posedge clk)
         char_byte_del <= char_byte;
-	 
+
     always @ (*)
     begin
         if (video_enabled) begin
@@ -155,10 +164,40 @@ module cga_pixel(
         end
     end
 
+    wire pcjr_mode06_emit = clk_seq[0];
+
+    // PCjr 640x200x2 is a 16-bit 1bpp stream, MSB first.
+    // Capture the next word on the pipeline event, then load/shift only
+    // on the effective pixel cadence used by the 640-pixel output path.
+    always @ (posedge clk)
+    begin
+        if (pcjr_mode_640x200x2) begin
+            if (disp_pipeline) begin
+                pcjr_mode06_pending_word <= {char_byte_del, attr_byte};
+                pcjr_mode06_pending_valid <= 1'b1;
+            end
+            if (pcjr_mode06_emit) begin
+                if (pcjr_mode06_pending_valid) begin
+                    pcjr_mode06_shift <= pcjr_mode06_pending_word;
+                    pcjr_mode06_bits_left <= 4'd15;
+                    pcjr_mode06_pending_valid <= 1'b0;
+                end else if (pcjr_mode06_bits_left != 4'd0) begin
+                    pcjr_mode06_shift <= {pcjr_mode06_shift[14:0], 1'b0};
+                    pcjr_mode06_bits_left <= pcjr_mode06_bits_left - 1'b1;
+                end
+            end
+        end else begin
+            pcjr_mode06_shift <= 16'd0;
+            pcjr_mode06_bits_left <= 4'd0;
+            pcjr_mode06_pending_word <= 16'd0;
+            pcjr_mode06_pending_valid <= 1'b0;
+        end
+    end
+
     // Look up character byte in our character ROM table
     assign rom_addr = {char_byte, row_addr[2:0]};
     wire pattern_chr = (char_byte >= 8'hB0 && char_byte <= 8'hDF);
-	 
+
     always @ (posedge clk)
     begin
         // Only load character bits at this point
@@ -173,9 +212,9 @@ module cga_pixel(
     // This must be a mux. Using a shift register causes very weird
     // issues with the character ROM and Yosys turns it into a bunch
     // of flip-flops instead of a ROM.
-	 	 
-	 assign charpix_sel = hres_mode ? (clk_seq[3:1] + 3'd6) : (clk_seq[4:2] + 3'd7);  
-	 
+
+	 assign charpix_sel = hres_mode ? (clk_seq[3:1] + 3'd6) : (clk_seq[4:2] + 3'd7);
+
     always @ (*)
     begin
         if (video_enabled) begin
@@ -201,7 +240,7 @@ module cga_pixel(
     wire[2:0] tmp_clk_seq;
     assign tmp_clk_seq = clk_seq + 3'd7;
     assign pix_640 = tmp_clk_seq[1] ? pix_bits[0] : pix_bits[1];
-	 
+
 	 // In Tandy 320x200x16 and 160x200x16 modes, concatenate two adjacent pixels
     wire temp;
     assign temp = clk_seq[1:0] == 2'b00;
@@ -248,6 +287,7 @@ module cga_pixel(
         .tandy_bordercol(tandy_bordercol),
         .tandy_color_4(tandy_color_4),
 		  .tandy_color_16(tandy_color_16),
+        .pcjr_mode_640x200x2(pcjr_mode_640x200x2),
         .pix_out(video_out),
         .overscan(overscan)
     );
