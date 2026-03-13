@@ -15,6 +15,7 @@ module cga_sequencer(
     output vram_read_char,
     output vram_read_att,
     input hres_mode,
+    input crtc_2x,
     output crtc_clk,
     output charrom_read,
     output disp_pipeline,
@@ -43,7 +44,7 @@ module cga_sequencer(
     assign lclk = (clkdiv == 5'd0);
     assign hclk = (clkdiv == 5'd0) || (clkdiv == 5'd16);
 
-    assign crtc_clk_int = (clkdiv == 5'd0) || (hres_mode ? (clkdiv == 5'd16) : 0);
+    assign crtc_clk_int = (clkdiv == 5'd0) || (crtc_2x ? (clkdiv == 5'd16) : 0);
 
     // Control signals based on the sequencer state
     assign vram_read = (clkdiv == 5'd1) || (clkdiv == 5'd2) || (clkdiv == 5'd3) ||

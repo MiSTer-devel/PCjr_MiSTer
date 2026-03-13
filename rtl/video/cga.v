@@ -125,6 +125,7 @@ module cga(
 
     wire bw_mode;
     wire mode_640;
+    wire crtc_2x;
     wire video_enabled;
     wire blink_enabled;
     wire tandy_color_4;
@@ -293,6 +294,7 @@ module cga(
     // mode control register (write only)
     //
     assign hres_mode = pcjr_video ? pcjr_hres_mode : cga_control_reg[0]; // 1=80x25,0=40x25
+    assign crtc_2x = pcjr_video ? pcjr_array[0][0] : cga_control_reg[0];
     assign grph_mode = pcjr_video ? pcjr_grph_mode : cga_control_reg[1]; // 1=graphics, 0=text
     assign bw_mode = pcjr_video ? pcjr_bw_mode : cga_control_reg[2]; // 1=b&w, 0=color
 
@@ -384,7 +386,7 @@ module cga(
 		  .crt_v_offset(crt_v_offset),
 		  .vsync_width_osd(vsync_width_osd),
 		  .hsync_width_osd(hsync_width_osd),
-		  .hres_mode(hres_mode)
+		  .crtc_2x(crtc_2x)
 		 );
 
     // CGA 80 column timings
@@ -430,6 +432,7 @@ module cga(
         .vram_read_char(vram_read_char),
         .vram_read_att(vram_read_att),
         .hres_mode(hres_mode),
+        .crtc_2x(crtc_2x),
         .crtc_clk(crtc_clk),
         .charrom_read(charrom_read),
         .disp_pipeline(disp_pipeline),

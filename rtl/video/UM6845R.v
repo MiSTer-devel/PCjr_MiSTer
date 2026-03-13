@@ -50,7 +50,7 @@ module UM6845R
 	input      [2:0] crt_v_offset,
 	input      [2:0] vsync_width_osd, // OSD vsync pulse width: 0=Auto (use register), 1-7=override
 	input      [2:0] hsync_width_osd, // OSD hsync pulse width: 0=Auto, 1-7=fixed (N*16 pixel clocks)
-	input            hres_mode
+	input            crtc_2x
 );
 
 parameter H_TOTAL = 0;
@@ -240,7 +240,7 @@ end
 reg        hde;
 reg  [3:0] hsc;
 
-wire hsync_on = hcc == (R2_h_sync_pos - (hres_mode ? 3 : 4)) && R3_h_sync_width != 0;
+wire hsync_on = hcc == (R2_h_sync_pos - (crtc_2x ? 3 : 4)) && R3_h_sync_width != 0;
 wire hsync_off = (hsc == R3_h_sync_width) || (CRTC_TYPE && R3_h_sync_width == 0);
 
 reg hsync_raw;
@@ -291,12 +291,12 @@ always @(posedge CLOCK) begin
 end
 
 // Use reshaped HSYNC only in low-res (40-col) mode when OSD override is active.
-wire hsync_effective = (|hsync_width_osd & ~hres_mode) ? hsync_shaped : hsync_raw;
+wire hsync_effective = (|hsync_width_osd & ~crtc_2x) ? hsync_shaped : hsync_raw;
 
 reg [121:0] hsync_delay_line;
 always @(posedge CLOCK) begin
     hsync_delay_line <= {hsync_delay_line[120:0], hsync_effective};
-    HSYNC <= hsync_delay_line[(hres_mode ? 60 : 120) - (crt_h_offset << (hres_mode ? 2 : 3))];
+    HSYNC <= hsync_delay_line[(crtc_2x ? 60 : 120) - (crt_h_offset << (crtc_2x ? 2 : 3))];
 end
 
 reg vsync_raw;
@@ -328,7 +328,7 @@ always @(posedge CLOCK) begin
 		end
 		if(field ? (hcc_next == {1'b0, R0_h_total[7:1]}) : line_new) begin
 			if(vsc) vsc <= vsc - 1'd1;
-			else if (vsync_allow & (field ? ((row == R7_v_sync_pos - (hres_mode ? 1 : 2)) && !line) : ((row_next == R7_v_sync_pos - (hres_mode ? 1 : 2)) && line_last))) begin
+			else if (vsync_allow & (field ? ((row == R7_v_sync_pos - (crtc_2x ? 1 : 2)) && !line) : ((row_next == R7_v_sync_pos - (crtc_2x ? 1 : 2)) && line_last))) begin
 				VSYNC_r <= 1;
 				// Don't allow a new vsync until a new row (Onescreen Colonies) or the R7 is written (PHX)
 				vsync_allow <= 0;
